@@ -37,7 +37,7 @@ func Auth(tokens *token.Manager) func(http.Handler) http.Handler {
 				unauthorized(w)
 				return
 			}
-			claims, err := tokens.VerifyAccess(raw)
+			claims, err := tokens.VerifyAccess(r.Context(), raw)
 			if err != nil {
 				unauthorized(w)
 				return

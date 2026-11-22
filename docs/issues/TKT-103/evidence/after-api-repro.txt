@@ -1,0 +1,51 @@
+﻿=== TKT-103 AFTER API REPRODUCTION (http://localhost:8081) ===
+Timestamp: 2026-11-22T20:53:35.5456818+07:00
+
+--- 1. POST /api/v1/auth/register ---
+HTTP/1.1 201 Created
+Content-Type: application/json
+Set-Cookie: meme_access_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySUQiOiJlNTY5MWM4Ni04NzE3LTRmYzEtYWYwMS0xZjA5ZDg0Mjc2OTYiLCJyb2xlIjoidXNlciIsInRva2VuVHlwZSI6ImFjY2VzcyIsImlzcyI6Im1lbWUtcG9ydGFsIiwic3ViIjoiZTU2OTFjODYtODcxNy00ZmMxLWFmMDEtMWYwOWQ4NDI3Njk2IiwiZXhwIjoxNzk1MzU2NTE1LCJpYXQiOjE3OTUzNTU2MTUsImp0aSI6IjE3MzQ4Y2RhN2ZlNGEwY2E4NTAxZTBhNzNlOTA2ZTcyIn0.TW1UQGAx8ZKwSv1TBBeuAzZ4s9G2-S7X0EC6z6KBnZI; Path=/; Max-Age=900; HttpOnly; SameSite=Lax
+Set-Cookie: meme_refresh_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySUQiOiJlNTY5MWM4Ni04NzE3LTRmYzEtYWYwMS0xZjA5ZDg0Mjc2OTYiLCJyb2xlIjoidXNlciIsInRva2VuVHlwZSI6InJlZnJlc2giLCJpc3MiOiJtZW1lLXBvcnRhbCIsInN1YiI6ImU1NjkxYzg2LTg3MTctNGZjMS1hZjAxLTFmMDlkODQyNzY5NiIsImV4cCI6MTc5Nzk0NzYxNSwiaWF0IjoxNzk1MzU1NjE1LCJqdGkiOiIyODU2Y2Y2MjhiYjA5NjUzY2M2MGJmZGJmOGY2YzQ3NCJ9.XCY3zZHUP_U7pRnzhO1aSpwCCMGZEk3ACWYfCSPzIiY; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax
+Date: Sun, 22 Nov 2026 13:53:35 GMT
+Content-Length: 1028
+
+{"success":true,"code":10101,"message":"registrasi berhasil","data":{"user":{"id":"e5691c86-8717-4fc1-af01-1f09d8427696","email":"tkt103-after-1795355615@example.com","name":"TKT103 After","role":"user"},"token":{"accessToken":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySUQiOiJlNTY5MWM4Ni04NzE3LTRmYzEtYWYwMS0xZjA5ZDg0Mjc2OTYiLCJyb2xlIjoidXNlciIsInRva2VuVHlwZSI6ImFjY2VzcyIsImlzcyI6Im1lbWUtcG9ydGFsIiwic3ViIjoiZTU2OTFjODYtODcxNy00ZmMxLWFmMDEtMWYwOWQ4NDI3Njk2IiwiZXhwIjoxNzk1MzU2NTE1LCJpYXQiOjE3OTUzNTU2MTUsImp0aSI6IjE3MzQ4Y2RhN2ZlNGEwY2E4NTAxZTBhNzNlOTA2ZTcyIn0.TW1UQGAx8ZKwSv1TBBeuAzZ4s9G2-S7X0EC6z6KBnZI","refreshToken":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySUQiOiJlNTY5MWM4Ni04NzE3LTRmYzEtYWYwMS0xZjA5ZDg0Mjc2OTYiLCJyb2xlIjoidXNlciIsInRva2VuVHlwZSI6InJlZnJlc2giLCJpc3MiOiJtZW1lLXBvcnRhbCIsInN1YiI6ImU1NjkxYzg2LTg3MTctNGZjMS1hZjAxLTFmMDlkODQyNzY5NiIsImV4cCI6MTc5Nzk0NzYxNSwiaWF0IjoxNzk1MzU1NjE1LCJqdGkiOiIyODU2Y2Y2MjhiYjA5NjUzY2M2MGJmZGJmOGY2YzQ3NCJ9.XCY3zZHUP_U7pRnzhO1aSpwCCMGZEk3ACWYfCSPzIiY","expiresIn":900}}}
+
+--- 1b. Decoded Access JWT Payload ---
+{"userID":"e5691c86-8717-4fc1-af01-1f09d8427696","role":"user","tokenType":"access","iss":"meme-portal","sub":"e5691c86-8717-4fc1-af01-1f09d8427696","exp":1795356515,"iat":1795355615,"jti":"17348cda7fe4a0ca8501e0a73e906e72"}
+
+--- 2. POST /api/v1/auth/logout ---
+HTTP/1.1 200 OK
+Content-Type: application/json
+Set-Cookie: meme_access_token=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax
+Set-Cookie: meme_refresh_token=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax
+Date: Sun, 22 Nov 2026 13:53:35 GMT
+Content-Length: 58
+
+{"success":true,"code":10104,"message":"logout berhasil"}
+
+--- 3. GET /api/v1/auth/me AFTER logout (replaying access token) ---
+HTTP/1.1 401 Unauthorized
+Content-Type: application/json
+Date: Sun, 22 Nov 2026 13:53:36 GMT
+Content-Length: 55
+
+{"success":false,"code":10002,"message":"unauthorized"}
+
+--- 4. POST /api/v1/auth/refresh AFTER logout ---
+HTTP/1.1 401 Unauthorized
+Content-Type: application/json
+Date: Sun, 22 Nov 2026 13:53:36 GMT
+Content-Length: 61
+
+{"success":false,"code":10002,"message":"token tidak valid"}
+
+--- 5. POST /api/v1/auth/logout with invalid/expired cookies ---
+HTTP/1.1 200 OK
+Content-Type: application/json
+Set-Cookie: meme_access_token=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax
+Set-Cookie: meme_refresh_token=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax
+Date: Sun, 22 Nov 2026 13:53:36 GMT
+Content-Length: 58
+
+{"success":true,"code":10104,"message":"logout berhasil"}

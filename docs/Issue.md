@@ -10,7 +10,7 @@ We resolve tickets using **Repro-Test-First EDD (Error-Driven Development)** in 
 
 | Order | Ticket | Title | Layer | Depends On / Unblocks | Pending Decisions | Status | Commit |
 | :---: | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| 1 | [TKT-103](./issues/TKT-103/TKT-103.md) | Broken Logout Flow & Infinite Redirect Loop | Backend + Frontend | Unblocks multi-user testing | Cookie `HttpOnly` & `/` route guard | Open | — |
+| 1 | [TKT-103](./issues/TKT-103/TKT-103.md) | Broken Logout Flow & Infinite Redirect Loop | Backend + Frontend | Unblocks multi-user testing | Resolved | Resolved | — |
 | 2 | [TKT-102](./issues/TKT-102/TKT-102.md) | Inconsistent Subscription Status & Cross-User Data Leakage | Backend | Unblocks clean cache repros for 101 & 104 | `Vary` header & cache scope | Open | — |
 | 3 | [TKT-104](./issues/TKT-104/TKT-104.md) | Stale Subscription State Until Hard Refresh | Frontend | Paired with TKT-102 | `staleTime` value & invalidation triggers | Open | — |
 | 4 | [TKT-101](./issues/TKT-101/TKT-101.md) | Meme Creation Permitted After Subscription Expiration | Backend | Cleaner after TKT-102 & TKT-104 | `MemesUsed` window (`sub.StartsAt` vs rolling) | Open | — |

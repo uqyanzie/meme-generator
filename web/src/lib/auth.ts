@@ -27,6 +27,7 @@ export function useMe() {
 }
 
 export function useRegister() {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: AuthInput) => {
       const res = await api.post<ApiEnvelope<AuthResponse>>(
@@ -35,6 +36,7 @@ export function useRegister() {
       );
       return res.data;
     },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }),
   });
 }
 
@@ -56,7 +58,7 @@ export function useLogout() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async () => api.post("/api/v1/auth/logout"),
-    onSuccess: () => {
+    onSettled: () => {
       qc.clear();
       window.location.href = "/";
     },

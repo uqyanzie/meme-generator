@@ -9,20 +9,19 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useLogin } from "@/lib/auth";
+import { useLogin, useMe } from "@/lib/auth";
 import { apiErrorMessage } from "@/lib/api";
 
 export default function LoginPage() {
   const router = useRouter();
   const login = useLogin();
+  const me = useMe();
 
-  // BUG: kalau cookie auth masih ada (misal logout gagal menghapusnya),
-  // langsung dilempar ke halaman utama — memicu redirect bolak-balik.
   useEffect(() => {
-    if (document.cookie.includes("meme_access_token")) {
+    if (me.data && !login.isPending && !login.isSuccess) {
       router.replace("/");
     }
-  }, [router]);
+  }, [me.data, login.isPending, login.isSuccess, router]);
 
   const form = useForm({
     defaultValues: { email: "", password: "" },

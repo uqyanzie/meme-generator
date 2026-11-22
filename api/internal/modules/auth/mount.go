@@ -20,5 +20,5 @@ func RegisterRoutes(mux *http.ServeMux, h *Handler, authMW func(http.Handler) ht
 	mux.HandleFunc("POST /api/v1/auth/login", h.Login)
 	mux.HandleFunc("POST /api/v1/auth/refresh", h.Refresh)
 	mux.Handle("GET /api/v1/auth/me", authMW(http.HandlerFunc(h.Me)))
-	mux.Handle("POST /api/v1/auth/logout", authMW(http.HandlerFunc(h.Logout)))
+	mux.HandleFunc("POST /api/v1/auth/logout", h.Logout)
 }

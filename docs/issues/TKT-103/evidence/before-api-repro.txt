@@ -1,0 +1,26 @@
+# TKT-103 Before Reproduction — Live API (`http://localhost:8080`)
+Captured: 2026-11-22T19:02:57+07:00
+
+=== 1. Register / Login ===
+HTTP/1.1 201 Created
+Set-Cookie: meme_access_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySUQiOiI2NDg3YjM2My05MDVjLTQ5NmEtYjljYy0zMjYzMmQ1NjRkMDUiLCJyb2xlIjoidXNlciIsInRva2VuVHlwZSI6ImFjY2VzcyIsImlzcyI6Im1lbWUtcG9ydGFsIiwic3ViIjoiNjQ4N2IzNjMtOTA1Yy00OTZhLWI5Y2MtMzI2MzJkNTY0ZDA1IiwiZXhwIjoxNzk1MzQ5ODc2LCJpYXQiOjE3OTUzNDg5NzZ9.v6kSW4q0BdH3Ak3_Y3kr7uqdQoA7PDwNWnM0G0LDAzA; Path=/; Max-Age=900; SameSite=Lax
+Set-Cookie: meme_refresh_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySUQiOiI2NDg3YjM2My05MDVjLTQ5NmEtYjljYy0zMjYzMmQ1NjRkMDUiLCJyb2xlIjoidXNlciIsInRva2VuVHlwZSI6InJlZnJlc2giLCJpc3MiOiJtZW1lLXBvcnRhbCIsInN1YiI6IjY0ODdiMzYzLTkwNWMtNDk2YS1iOWNjLTMyNjMyZDU2NGQwNSIsImV4cCI6MTc5Nzk0MDk3NiwiaWF0IjoxNzk1MzQ4OTc2fQ.JUi6z8AaArETgbjHxziKKkbMg8t5nybnxDdHiTToj0I; Path=/; Max-Age=2592000; SameSite=Lax
+
+=== 2. GET /api/v1/auth/me BEFORE logout ===
+HTTP/1.1 200 OK | {"success":true,"code":10105,"message":"profil user","data":{"id":"6487b363-905c-496a-b9cc-32632d564d05","email":"tkt103-repro@example.com","name":"TKT103 Repro","role":"user"}}
+
+=== 3. POST /api/v1/auth/logout ===
+HTTP/1.1 200 OK
+Set-Cookie: meme_access_token=; Path=/api/v1/auth; Max-Age=0; SameSite=Lax
+Set-Cookie: meme_refresh_token=; Path=/api/v1/auth; Max-Age=0; SameSite=Lax
+{"success":true,"code":10104,"message":"logout berhasil"}
+
+=== 4. GET /api/v1/auth/me AFTER logout (replaying same access token) ===
+HTTP/1.1 200 OK | {"success":true,"code":10105,"message":"profil user","data":{"id":"6487b363-905c-496a-b9cc-32632d564d05","email":"tkt103-repro@example.com","name":"TKT103 Repro","role":"user"}}
+
+=== 5. POST /api/v1/auth/refresh AFTER logout ===
+HTTP/1.1 401 Unauthorized | {"success":false,"code":10002,"message":"token tidak valid"}
+
+=== 6. POST /api/v1/auth/logout with expired/invalid token ===
+HTTP/1.1 401 Unauthorized
+{"success":false,"code":10002,"message":"unauthorized"}

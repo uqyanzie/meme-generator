@@ -3,7 +3,9 @@ package auth
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/nyxsr/meme-portal/api/internal/middleware"
 	"github.com/nyxsr/meme-portal/api/internal/platform/cookie"
@@ -30,19 +32,22 @@ func setAuthCookies(w http.ResponseWriter, res AuthResponse) {
 		30*24*3600, false)
 }
 
-// clearAuthCookies TIDAK benar-benar menghapus cookie: Path-nya salah
-// ("/api/v1/auth" sedangkan cookie asli disimpan di Path "/").
+// clearAuthCookies menghapus cookie auth pada Path "/" agar cocok dengan setAuthCookies.
 func clearAuthCookies(w http.ResponseWriter) {
-	for _, name := range []string{cookie.AccessTokenName, cookie.RefreshTokenName} {
-		http.SetCookie(w, &http.Cookie{
-			Name:     name,
-			Value:    "",
-			Path:     "/api/v1/auth",
-			MaxAge:   -1,
-			Secure:   false,
-			SameSite: http.SameSiteLaxMode,
-		})
+	cookie.Clear(w, cookie.AccessTokenName)
+	cookie.Clear(w, cookie.RefreshTokenName)
+}
+
+func extractAccessToken(r *http.Request) string {
+	if header := r.Header.Get("Authorization"); strings.HasPrefix(header, "Bearer ") {
+		if raw := strings.TrimSpace(strings.TrimPrefix(header, "Bearer ")); raw != "" {
+			return raw
+		}
 	}
+	if c, err := r.Cookie(cookie.AccessTokenName); err == nil {
+		return c.Value
+	}
+	return ""
 }
 
 func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
@@ -117,14 +122,14 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
-	userID, ok := middleware.UserIDFromContext(r.Context())
-	if !ok {
-		response.Error(w, http.StatusUnauthorized, response.CodeUnauthorized, "unauthorized")
-		return
+	accessRaw := extractAccessToken(r)
+	refreshRaw := ""
+	if c, err := r.Cookie(cookie.RefreshTokenName); err == nil {
+		refreshRaw = c.Value
 	}
-	if err := h.service.Logout(r.Context(), userID); err != nil {
-		response.Error(w, http.StatusInternalServerError, response.CodeInternalServer, "gagal logout")
-		return
+
+	if err := h.service.Logout(r.Context(), accessRaw, refreshRaw); err != nil {
+		slog.WarnContext(r.Context(), "auth: gagal mencabut token saat logout", "err", err)
 	}
 	clearAuthCookies(w)
 	response.Success(w, http.StatusOK, CodeAuthLogoutSuccess, nil, "logout berhasil")

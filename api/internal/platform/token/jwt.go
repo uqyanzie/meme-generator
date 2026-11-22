@@ -18,7 +18,8 @@ const (
 	TypeAccess  = "access"
 	TypeRefresh = "refresh"
 
-	refreshKeyPrefix = "auth:refresh:"
+	refreshKeyPrefix       = "auth:refresh:"
+	revokedAccessKeyPrefix = "auth:revoked:access:"
 )
 
 var (
@@ -83,12 +84,19 @@ func (m *Manager) Issue(ctx context.Context, userID, role string) (Pair, error) 
 }
 
 func (m *Manager) signed(userID, role, tokenType string, ttl time.Duration) (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("token: gagal membuat jti: %w", err)
+	}
+	jti := hex.EncodeToString(b)
+
 	now := time.Now()
 	claims := Claims{
 		UserID:    userID,
 		Role:      role,
 		TokenType: tokenType,
 		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        jti,
 			Issuer:    m.issuer,
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
@@ -112,8 +120,38 @@ func (m *Manager) parse(raw, tokenType string) (*Claims, error) {
 	return &claims, nil
 }
 
-func (m *Manager) VerifyAccess(raw string) (*Claims, error) {
+// ParseAccess memverifikasi tanda tangan dan expiry access token tanpa mengecek denylist Redis.
+func (m *Manager) ParseAccess(raw string) (*Claims, error) {
 	return m.parse(raw, TypeAccess)
+}
+
+func (m *Manager) VerifyAccess(ctx context.Context, raw string) (*Claims, error) {
+	claims, err := m.parse(raw, TypeAccess)
+	if err != nil {
+		return nil, err
+	}
+	if m.redis != nil && claims.ID != "" {
+		exists, err := m.redis.Exists(ctx, revokedAccessKeyPrefix+claims.ID).Result()
+		if err != nil {
+			return nil, fmt.Errorf("token: gagal memeriksa denylist access token: %w", err)
+		}
+		if exists > 0 {
+			return nil, ErrTokenRevoked
+		}
+	}
+	return claims, nil
+}
+
+// RevokeAccess mencatat jti access token ke denylist Redis hingga sisa masa berlakunya habis.
+func (m *Manager) RevokeAccess(ctx context.Context, jti string, expiresAt time.Time) error {
+	if m.redis == nil || jti == "" {
+		return nil
+	}
+	ttl := time.Until(expiresAt)
+	if ttl <= 0 {
+		return nil
+	}
+	return m.redis.Set(ctx, revokedAccessKeyPrefix+jti, "1", ttl).Err()
 }
 
 func (m *Manager) VerifyRefresh(ctx context.Context, raw string) (*Claims, error) {

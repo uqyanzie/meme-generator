@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -69,8 +70,33 @@ func (s *Service) Me(ctx context.Context, userID string) (UserDTO, error) {
 	return toDTO(user), nil
 }
 
-func (s *Service) Logout(ctx context.Context, userID string) error {
-	return s.tokens.Revoke(ctx, userID)
+func (s *Service) Logout(ctx context.Context, accessRaw, refreshRaw string) error {
+	var errs []error
+	var revokedUserID string
+
+	if accessRaw != "" {
+		if claims, err := s.tokens.ParseAccess(accessRaw); err == nil {
+			if claims.ExpiresAt != nil {
+				if err := s.tokens.RevokeAccess(ctx, claims.ID, claims.ExpiresAt.Time); err != nil {
+					errs = append(errs, err)
+				}
+			}
+			if err := s.tokens.Revoke(ctx, claims.UserID); err != nil {
+				errs = append(errs, err)
+			}
+			revokedUserID = claims.UserID
+		}
+	}
+
+	if refreshRaw != "" {
+		if claims, err := s.tokens.VerifyRefresh(ctx, refreshRaw); err == nil && claims.UserID != revokedUserID {
+			if err := s.tokens.Revoke(ctx, claims.UserID); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
+
+	return errors.Join(errs...)
 }
 
 func (s *Service) issue(ctx context.Context, user User) (AuthResponse, error) {
