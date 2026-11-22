@@ -1,0 +1,25 @@
+﻿1. REGISTER: {"success":true,"code":10101,"message":"registrasi berhasil","data":{"user":{"id":"bb7d4541-d328-4dcd-a283-8885356ecfc0","email":"tkt101-after-1795370648@example.com","name":"TKT101 After","role":"user"},"token":{"accessToken":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySUQiOiJiYjdkNDU0MS1kMzI4LTRkY2QtYTI4My04ODg1MzU2ZWNmYzAiLCJyb2xlIjoidXNlciIsInRva2VuVHlwZSI6ImFjY2VzcyIsImlzcyI6Im1lbWUtcG9ydGFsIiwic3ViIjoiYmI3ZDQ1NDEtZDMyOC00ZGNkLWEyODMtODg4NTM1NmVjZmMwIiwiZXhwIjoxNzk1MzcxNTQ4LCJpYXQiOjE3OTUzNzA2NDgsImp0aSI6IjQ0MWEzNGYzOWRhN2NkNGEzNGZiMTI1NGNkMjEwYWMwIn0.9TX3-0SGB3oRgp8W-OTBwgbWZus-zENVq0SXUrXUW1s","refreshToken":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySUQiOiJiYjdkNDU0MS1kMzI4LTRkY2QtYTI4My04ODg1MzU2ZWNmYzAiLCJyb2xlIjoidXNlciIsInRva2VuVHlwZSI6InJlZnJlc2giLCJpc3MiOiJtZW1lLXBvcnRhbCIsInN1YiI6ImJiN2Q0NTQxLWQzMjgtNGRjZC1hMjgzLTg4ODUzNTZlY2ZjMCIsImV4cCI6MTc5Nzk2MjY0OCwiaWF0IjoxNzk1MzcwNjQ4LCJqdGkiOiI2ZmMzZTBjMmJhYTM5YmY3MmI4ZTk1MzdhMDkyYTM0ZCJ9.q_IYIjjY0IU1lCKw9NSrEodBm19N3hqt56YlRkyN8Ww","expiresIn":900}}}
+
+2. CHECKOUT: {"success":true,"code":20102,"message":"checkout dibuat","data":{"subscription":{"id":"8f150eea-a7f9-4fdf-abf1-ad237582f4d1","userId":"bb7d4541-d328-4dcd-a283-8885356ecfc0","planId":"e6ce09f5-21df-465c-a303-9582f1357a9b","status":"pending"},"payment":{"id":"a8b6a24e-5178-49c2-a3ce-e86485ef8352","subscriptionId":"8f150eea-a7f9-4fdf-abf1-ad237582f4d1","amountIdr":5000,"status":"pending","reference":"9ce5fad90906a9d48df7eab6"},"mockGatewayUrl":"/api/v1/subscription/payments/9ce5fad90906a9d48df7eab6/confirm"}}
+
+3. CONFIRM: {"success":true,"code":20103,"message":"pembayaran terkonfirmasi","data":{"payment":{"id":"a8b6a24e-5178-49c2-a3ce-e86485ef8352","subscriptionId":"8f150eea-a7f9-4fdf-abf1-ad237582f4d1","amountIdr":5000,"status":"paid","reference":"9ce5fad90906a9d48df7eab6"},"subscription":{"id":"8f150eea-a7f9-4fdf-abf1-ad237582f4d1","userId":"bb7d4541-d328-4dcd-a283-8885356ecfc0","planId":"e6ce09f5-21df-465c-a303-9582f1357a9b","status":"active","startsAt":"2026-11-23T01:04:08.116625+07:00","endsAt":"2026-11-24T01:04:08.116625+07:00"}}}
+
+4. UPLOAD WHILE ACTIVE: {"success":true,"code":30106,"message":"upload disiapkan","data":{"id":"aa0bf98a-9610-4e8b-8e0c-37f3032bcbbb","uploadUrl":"http://localhost:3900/meme-portal/base/7fa0ec0bcd949f361a76f51a.png?X-Amz-Algorithm=AWS4-HMAC-SHA256\u0026X-Amz-Credential=GK4f8e1c2a9b3d7e6051c2f3a4b5c6d7e8%2F20261122%2Fgarage%2Fs3%2Faws4_request\u0026X-Amz-Date=20261122T180408Z\u0026X-Amz-Expires=900\u0026X-Amz-SignedHeaders=content-type%3Bhost\u0026x-id=PutObject\u0026X-Amz-Signature=eb70576ec9d224701b8c936bdf97a3cd745ca6c7b67021b5d5e3cdeee0c62057","baseUrl":"http://meme-portal.web.garage.localhost:3902/base/7fa0ec0bcd949f361a76f51a.png"}}
+
+5. BACKDATE ENDS_AT:
+                  id                  | status |            ends_at            | is_expired 
+--------------------------------------+--------+-------------------------------+------------
+ 8f150eea-a7f9-4fdf-abf1-ad237582f4d1 | active | 2026-11-22 17:04:08.358593+00 | t
+(1 row)
+
+UPDATE 1
+
+6. STATUS AFTER EXPIRY: {"success":true,"code":20104,"message":"status langganan","data":{"subscribed":false,"memesUsed":0,"maxMemes":0}}
+
+7. UPLOAD AFTER EXPIRY: HTTP 403 {"success":false,"code":20002,"message":"butuh langganan aktif untuk membuat meme"}
+
+
+8. COMPLETE AFTER EXPIRY: HTTP 405 Method Not Allowed
+
+
+9. RENEWAL CHECKOUT AFTER EXPIRY: {"success":true,"code":20102,"message":"checkout dibuat","data":{"subscription":{"id":"39a617c5-579b-47ff-884f-5c4d811f5324","userId":"bb7d4541-d328-4dcd-a283-8885356ecfc0","planId":"e6ce09f5-21df-465c-a303-9582f1357a9b","status":"pending"},"payment":{"id":"49092e0f-a4ae-4e97-aa7b-ea1ad0c7d39e","subscriptionId":"39a617c5-579b-47ff-884f-5c4d811f5324","amountIdr":5000,"status":"pending","reference":"1cf8858f673f524875e3f3fd"},"mockGatewayUrl":"/api/v1/subscription/payments/1cf8858f673f524875e3f3fd/confirm"}}

@@ -1,0 +1,43 @@
+=== TKT-101 BEFORE REPRODUCTION ===
+Timestamp (UTC): 2026-11-22T17:42:02.7486485Z
+Test User: tkt101-repro-1795369322@example.com
+
+--- 1. Register user ---
+HTTP 201: {"success":true,"code":10101,"message":"registrasi berhasil","data":{"user":{"id":"5a746b64-7237-42f9-bd83-6d3a269e2a3d","email":"tkt101-repro-1795369322@example.com","name":"TKT101 Repro","role":"user"},"token":{"accessToken":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySUQiOiI1YTc0NmI2NC03MjM3LTQyZjktYmQ4My02ZDNhMjY5ZTJhM2QiLCJyb2xlIjoidXNlciIsInRva2VuVHlwZSI6ImFjY2VzcyIsImlzcyI6Im1lbWUtcG9ydGFsIiwic3ViIjoiNWE3NDZiNjQtNzIzNy00MmY5LWJkODMtNmQzYTI2OWUyYTNkIiwiZXhwIjoxNzk1MzcwMjIzLCJpYXQiOjE3OTUzNjkzMjMsImp0aSI6Ijk2N2M1ZjNjOTgzNTNhYzJlZjBlZDBkMjNhZmI2OTY5In0.6WZ4wjWlBhEphYp0QSeqSGglZK6DbNi7Pi2gXO5YAyA","refreshToken":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySUQiOiI1YTc0NmI2NC03MjM3LTQyZjktYmQ4My02ZDNhMjY5ZTJhM2QiLCJyb2xlIjoidXNlciIsInRva2VuVHlwZSI6InJlZnJlc2giLCJpc3MiOiJtZW1lLXBvcnRhbCIsInN1YiI6IjVhNzQ2YjY0LTcyMzctNDJmOS1iZDgzLTZkM2EyNjllMmEzZCIsImV4cCI6MTc5Nzk2MTMyMywiaWF0IjoxNzk1MzY5MzIzLCJqdGkiOiJlMDk0ZDQ2OTgwM2ZlNjAwODJkNDdkM2I3NmY5NTdlNiJ9.SjJc9k4k0LL0jpLN9C7FYjMnaUa1DCZNBRerQKFrHcQ","expiresIn":900}}}
+
+
+--- 2. Checkout premium_1d & confirm payment ---
+CHECKOUT HTTP 201: {"success":true,"code":20102,"message":"checkout dibuat","data":{"subscription":{"id":"62abc7b6-904f-4408-baaf-7ef1a156d718","userId":"5a746b64-7237-42f9-bd83-6d3a269e2a3d","planId":"a48e2cce-75de-4c88-b96a-81e6f6b6b421","status":"pending"},"payment":{"id":"e4ff17b6-8c0e-473e-a4b0-70496a3a7382","subscriptionId":"62abc7b6-904f-4408-baaf-7ef1a156d718","amountIdr":5000,"status":"pending","reference":"6251a895c79a4609db7c183b"},"mockGatewayUrl":"/api/v1/subscription/payments/6251a895c79a4609db7c183b/confirm"}}
+
+CONFIRM HTTP 200: {"success":true,"code":20103,"message":"pembayaran terkonfirmasi","data":{"payment":{"id":"e4ff17b6-8c0e-473e-a4b0-70496a3a7382","subscriptionId":"62abc7b6-904f-4408-baaf-7ef1a156d718","amountIdr":5000,"status":"paid","reference":"6251a895c79a4609db7c183b"},"subscription":{"id":"62abc7b6-904f-4408-baaf-7ef1a156d718","userId":"5a746b64-7237-42f9-bd83-6d3a269e2a3d","planId":"a48e2cce-75de-4c88-b96a-81e6f6b6b421","status":"active","startsAt":"2026-11-23T00:42:03.421724+07:00","endsAt":"2026-11-24T00:42:03.421724+07:00"}}}
+
+
+--- 3. Status while active (before expiry) ---
+HTTP 200: {"success":true,"code":20104,"message":"status langganan","data":{"subscribed":true,"status":"active","planCode":"premium_1d","planName":"Premium 1 Hari","endsAt":"2026-11-23T17:42:03Z","memesUsed":0,"maxMemes":10}}
+
+
+--- 4. Simulate subscription expiration in Postgres (ends_at = now() - interval '1 hour', status still 'active') ---
+UPDATE 1
+                  id                  | status |           starts_at           |            ends_at            |            db_now             | is_expired 
+--------------------------------------+--------+-------------------------------+-------------------------------+-------------------------------+------------
+ 62abc7b6-904f-4408-baaf-7ef1a156d718 | active | 2026-11-22 17:42:03.421724+00 | 2026-11-22 16:42:05.683829+00 | 2026-11-22 17:42:07.885458+00 | t
+(1 row)
+
+
+--- 5. GET /api/v1/subscription/status AFTER expiration (BUG: still subscribed=true) ---
+HTTP 200: {"success":true,"code":20104,"message":"status langganan","data":{"subscribed":true,"status":"active","planCode":"premium_1d","planName":"Premium 1 Hari","endsAt":"2026-11-22T16:42:05Z","memesUsed":0,"maxMemes":10}}
+
+
+--- 6. POST /api/v1/memes/upload AFTER expiration (BUG: permitted, 201 Created) ---
+HTTP 201: {"success":true,"code":30106,"message":"upload disiapkan","data":{"id":"143a4df0-6607-4e38-8803-812d65cec6e1","uploadUrl":"http://localhost:3900/meme-portal/base/10c8bb08bb2f9c9db5ecc885.png?X-Amz-Algorithm=AWS4-HMAC-SHA256\u0026X-Amz-Credential=GK4f8e1c2a9b3d7e6051c2f3a4b5c6d7e8%2F20261122%2Fgarage%2Fs3%2Faws4_request\u0026X-Amz-Date=20261122T174208Z\u0026X-Amz-Expires=900\u0026X-Amz-SignedHeaders=content-type%3Bhost\u0026x-id=PutObject\u0026X-Amz-Signature=e7b37bb5be4035d5d614e6873be026f6b2d7f5326d65621c48fb9be5aff8e899","baseUrl":"http://meme-portal.web.garage.localhost:3902/base/10c8bb08bb2f9c9db5ecc885.png"}}
+
+
+--- 7. POST /api/v1/memes/143a4df0-6607-4e38-8803-812d65cec6e1/complete AFTER expiration (BUG: permitted, 200 OK) ---
+HTTP 200: {"success":true,"code":30104,"message":"meme selesai","data":{"id":"143a4df0-6607-4e38-8803-812d65cec6e1","userId":"5a746b64-7237-42f9-bd83-6d3a269e2a3d","title":"expired-sub-meme","baseUrl":"http://meme-portal.web.garage.localhost:3902/base/10c8bb08bb2f9c9db5ecc885.png","resultUrl":"http://meme-portal.web.garage.localhost:3902/result/143a4df0-6607-4e38-8803-812d65cec6e1.png","topText":"","bottomText":"","fontSize":0,"createdAt":"2026-11-23T00:42:07.951577+07:00"}}
+
+
+--- 8. POST /api/v1/subscription/checkout AFTER expiration (BUG: blocked with 409 already subscribed) ---
+HTTP 409: 
+
+--- 9. Cleanup test user ---
+DELETE 1

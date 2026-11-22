@@ -43,3 +43,18 @@ Clicking **Keluar (Logout)** previously failed to delete auth cookies (wrong `Pa
 - **Fix Report:** [TKT-104-fix-report.md](./docs/issues/TKT-104/TKT-104-fix-report.md)
 - **Root Cause:** `useSubscriptionStatus` set `staleTime: Number.POSITIVE_INFINITY` and ran unconditionally even when logged out; `useLogin`, `useRegister`, `useCompleteMeme`, and `useDeleteMeme` did not invalidate `queryKeys.subscription`.
 - **Solution:** Extracted `queryKeys` into `web/src/lib/query-keys.ts`, configured `useSubscriptionStatus` with `staleTime: 0`, `refetchOnWindowFocus: true`, `retry: false`, and `enabled: Boolean(user)`, added `queryKeys.subscription` invalidation to auth and meme mutations, and guarded `/studio` with `me.isLoading || (me.data && status.isPending)`.
+
+---
+
+## TKT-101: Meme Creation Permitted After Subscription Expiration
+
+- **Status:** Resolved
+- **Detailed Report:** [docs/issues/TKT-101/TKT-101-fix-report.md](./docs/issues/TKT-101/TKT-101-fix-report.md)
+- **Layer:** Backend
+
+### Summary
+`Repository.ActiveByUser` previously queried `WHERE s.user_id = $1 AND s.status = 'active'` without checking `s.ends_at > now()`. Between expiration and the hourly `expireJanitor` (`MarkExpired`) run, expired subscriptions were still treated as active, permitting meme creation, reporting `subscribed: true`, and blocking renewal checkouts with `409 Conflict`.
+
+### Solution
+- **Backend:** Added `AND s.ends_at > now()` to `Repository.ActiveByUser` in `api/internal/modules/subscription/repository.go`.
+- **Verification:** Added Go regression tests (`api/internal/modules/subscription/repository_test.go`, `api/internal/server/v1/v1_test.go`), passed `go vet`, `go test`, `go build`, `bun run check`, `bun run lint`, and verified live Before vs. After API behavior (`docs/issues/TKT-101/evidence/after-api-repro.txt`).
