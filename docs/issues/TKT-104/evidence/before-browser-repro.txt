@@ -1,0 +1,164 @@
+# TKT-104 Live "Before" Browser Reproduction Evidence
+# Captured: 2026-11-22 (prior to any TKT-104 code changes)
+# Frontend: http://localhost:3000 (Next.js dev server)
+# Backend:  http://localhost:8080 (running API instance)
+# Note: The running Go API instance during this capture was an older process started
+#       prior to commit 1e4ba58 (TKT-102), so responses still showed
+#       `cache-control: public, max-age=86400`. The frontend-specific defects
+#       (unauthenticated 401 churn, zero refetches on SPA navigation/focus due to
+#       staleTime: Number.POSITIVE_INFINITY, and missing subscription invalidation
+#       on login) were independently proven by network request counts (= 0).
+#       Before running "After" verification in Phase 2, restart the Go API from
+#       current HEAD so TKT-102's `Cache-Control: private, no-store` is active.
+
+================================================================================
+1. UNAUTHENTICATED 401 CHURN CHECK (http://localhost:3000/, fresh isolated context)
+================================================================================
+Exact /api/v1/... requests fired while logged out:
+  reqid=9  GET  http://localhost:8080/api/v1/auth/me              [401]
+  reqid=10 GET  http://localhost:8080/api/v1/subscription/status  [401]
+  reqid=11 POST http://localhost:8080/api/v1/auth/refresh         [400]
+  reqid=12 POST http://localhost:8080/api/v1/auth/refresh         [400]
+  reqid=14 GET  http://localhost:8080/api/v1/subscription/status  [401]
+  reqid=15 POST http://localhost:8080/api/v1/auth/refresh         [400]
+
+Observation:
+  - SiteHeader unconditionally calls useSubscriptionStatus() even when logged out.
+  - Because Providers sets default retry: 1 and useSubscriptionStatus has no
+    enabled: Boolean(user) gate or retry: false, GET /api/v1/subscription/status
+    fired TWICE (2x 401) and triggered 3x POST /api/v1/auth/refresh (400).
+
+================================================================================
+2. REGISTER FRESH USER & POPULATE useSubscriptionStatus CACHE
+================================================================================
+User: TKT104 Before <tkt104_before_repro@example.com> via http://localhost:3000/register
+
+Network requests on register + redirect to /pricing:
+  reqid=33 POST http://localhost:8080/api/v1/auth/register         [201]
+  reqid=35 GET  http://localhost:8080/api/v1/auth/me               [200]
+  reqid=36 GET  http://localhost:3000/pricing?_rsc=v0A3hOwsTnhfxHaq [200]
+  reqid=38 GET  http://localhost:8080/api/v1/subscription/plans    [200]
+  reqid=39 GET  http://localhost:8080/api/v1/subscription/status   [200]
+
+reqid=39 response body:
+  {"success":true,"code":20104,"message":"status langganan","data":{"subscribed":false,"memesUsed":0,"maxMemes":0}}
+
+Exact UI text on /pricing:
+  Status: belum berlangganan
+
+Exact UI text in top-right navbar hover card (button "Info akun"):
+  TKT104 Before
+  tkt104_before_repro@example.com
+  Langganan
+  Belum berlangganan — pilih paket
+
+================================================================================
+3. STALE SUBSCRIPTION STATE AFTER PURCHASE (SPA NAVIGATION + WINDOW FOCUS)
+================================================================================
+3a. Backend checkout & payment confirmation (same browser context cookies):
+  POST http://localhost:8080/api/v1/subscription/checkout [201]
+    (planCode: "premium_1d", Idempotency-Key: tkt104-before-1795365780326)
+    -> reference: "17284cc76f865e39be39f01f", status: "pending"
+
+  POST http://localhost:8080/api/v1/subscription/payments/17284cc76f865e39be39f01f/confirm [200]
+    -> subscription.status: "active", payment.status: "paid"
+    -> endsAt: "2026-11-23T23:43:12.923085+07:00"
+
+  (Incidental note unrelated to TKT-104: cross-origin POST /subscription/checkout
+   from http://localhost:3000 failed CORS preflight because api/internal/middleware/cors.go
+   Access-Control-Allow-Headers omits Idempotency-Key; tracked separately under checkout/TKT-105.)
+
+3b. SPA navigation (/pricing -> /studio -> / -> /pricing) + window blur/focus/visibilitychange:
+  All fetch/XHR requests fired (reqid=44..51):
+    reqid=44 GET http://localhost:3000/studio?_rsc=mf32xbX59GT2m-y9   [200]
+    reqid=46 GET http://localhost:8080/api/v1/auth/me                 [200]
+    reqid=47 GET http://localhost:8080/api/v1/memes?limit=20&offset=0 [200]
+    reqid=48 GET http://localhost:3000/?_rsc=epOcn_g3qAzYrIge         [200]
+    reqid=50 GET http://localhost:3000/pricing?_rsc=ZmCQ44b92m4mXe_R  [200]
+    reqid=51 GET http://localhost:8080/api/v1/subscription/plans      [200]
+
+  GET /api/v1/subscription/status requests fired: ZERO (0)
+
+  Exact stale UI text on /studio:
+    MEME STUDIO
+    Studio hanya untuk pelanggan. Berlangganan dulu untuk membuat meme.
+    Pilih Paket
+
+  Exact stale UI text on /pricing:
+    Status: belum berlangganan
+
+  Exact stale UI text in navbar hover card:
+    TKT104 Before
+    tkt104_before_repro@example.com
+    Langganan
+    Belum berlangganan — pilih paket
+
+3c. Fresh backend response (verified in clean-cache context, reqid=21):
+  GET http://localhost:8080/api/v1/subscription/status [200]
+  {"success":true,"code":20104,"message":"status langganan","data":{"subscribed":true,"status":"active","planCode":"premium_1d","planName":"Premium 1 Hari","endsAt":"2026-11-23T16:43:12Z","memesUsed":0,"maxMemes":10}}
+
+  Updated UI text on /pricing:
+    Paket Berlangganan
+    Status: Premium 1 Hari (aktif sampai 2026-11-23T16:43:12Z)
+    Kuota meme: 0 / 10 (sisa 10)
+
+  Updated UI text in navbar hover card:
+    TKT104 Before
+    tkt104_before_repro@example.com
+    Langganan
+    Paket: Premium 1 Hari
+    Berakhir dalam 23 jam 55 menit 44 detik
+
+================================================================================
+4. STALE QUOTA / ZERO REFETCH ACROSS /studio <-> /pricing NAVIGATION
+================================================================================
+Initial UI state (subscribed user, clean context):
+  /studio:  Sisa kuota: 10 meme
+  /pricing: Kuota meme: 0 / 10 (sisa 10)
+
+SPA navigation /studio -> /pricing -> /studio (reqid=23..28):
+  reqid=23 GET http://localhost:3000/pricing?_rsc=epOcn_g3qAzYrIge  [200]
+  reqid=25 GET http://localhost:8080/api/v1/subscription/plans      [200]
+  reqid=26 GET http://localhost:3000/studio?_rsc=mf32xbX59GT2m-y9   [200]
+  reqid=27 GET http://localhost:8080/api/v1/auth/me                 [200]
+  reqid=28 GET http://localhost:8080/api/v1/memes?limit=20&offset=0 [200]
+
+  GET /api/v1/subscription/status requests fired: ZERO (0)
+  (Combined with useCompleteMeme & useDeleteMeme only invalidating ["memes"] in
+   web/src/lib/queries.ts:100,108, quota displays remain frozen until hard reload.)
+
+================================================================================
+5. LOGIN TRANSITION (useLogin DOES NOT INVALIDATE queryKeys.subscription)
+================================================================================
+Scenario 5A — Clean context /login -> sign in as subscribed user (tkt104_before_repro@example.com):
+  Before login (on /login while logged out):
+    reqid=9  GET  http://localhost:8080/api/v1/auth/me             [401]
+    reqid=10 GET  http://localhost:8080/api/v1/subscription/status [401]
+    reqid=11 POST http://localhost:8080/api/v1/auth/refresh        [400]
+    reqid=12 POST http://localhost:8080/api/v1/auth/refresh        [400]
+    reqid=14 GET  http://localhost:8080/api/v1/subscription/status [401]
+    reqid=15 POST http://localhost:8080/api/v1/auth/refresh        [400]
+
+  On login submit:
+    reqid=17 POST http://localhost:8080/api/v1/auth/login            [200]
+    reqid=18 GET  http://localhost:8080/api/v1/auth/me               [200]
+    reqid=19 GET  http://localhost:3000/studio?_rsc=utQopaZyVbfSG9h2 [200]
+    reqid=21 GET  http://localhost:8080/api/v1/subscription/status   [200]
+    reqid=22 GET  http://localhost:8080/api/v1/memes?limit=20&offset=0 [200]
+
+  Observation: useLogin only invalidated ["me"] (reqid=18). Subscription status
+  was NOT invalidated by useLogin; it only refetched after /studio mounted (reqid=21)
+  because the previous unauthenticated query was in error state.
+
+Scenario 5B — Cached { subscribed: false } present before login as subscribed user:
+  When TanStack Query already held a cached 200 { subscribed: false } entry,
+  submitting /login as active subscriber tkt104_before_repro@example.com fired:
+    reqid=46 POST http://localhost:8080/api/v1/auth/login            [200]
+    reqid=47 GET  http://localhost:8080/api/v1/auth/me               [200]
+    reqid=48 GET  http://localhost:3000/studio?_rsc=utQopaZyVbfSG9h2 [200]
+    reqid=50 GET  http://localhost:8080/api/v1/memes?limit=20&offset=0 [200]
+
+  GET /api/v1/subscription/status requests fired: ZERO (0)
+  Resulting UI for active subscriber:
+    /studio:  Studio hanya untuk pelanggan. Berlangganan dulu untuk membuat meme.
+    Navbar:   Belum berlangganan — pilih paket

@@ -203,7 +203,7 @@ export default function StudioPage() {
 
   // Gate: halaman studio hanya untuk user yang sudah berlangganan.
   // Belum selesai dicek → tampilkan kosong dulu agar tidak berkedip.
-  if (me.isLoading || status.isLoading) {
+  if (me.isLoading || (me.data && status.isPending)) {
     return (
       <main className="mx-auto max-w-3xl p-8">
         <p className="text-muted-foreground">Memuat…</p>

@@ -32,3 +32,14 @@ Clicking **Keluar (Logout)** previously failed to delete auth cookies (wrong `Pa
 ### Solution
 - **Backend:** Removed the inline `Cache-Control: public, max-age=86400` wrapper from `GET /api/v1/subscription/status` in `api/internal/modules/subscription/mount.go`; enforced `Cache-Control: private, no-store` and appended `Vary: Cookie` and `Vary: Authorization` at the entry of `middleware.Auth` (`api/internal/middleware/auth.go`), protecting all authenticated endpoints (including `401` responses) while preserving `Vary: Origin` from `middleware.CORS` and leaving public routes untouched.
 - **Verification:** Added Go regression tests (`api/internal/middleware/auth_test.go`, `api/internal/modules/subscription/mount_test.go`), passed `go vet`, `go test`, `go build`, `bun run check`, `bun run lint`, and verified live Before vs. After API behavior (`docs/issues/TKT-102/evidence/after-api-repro.txt`).
+
+
+---
+
+## TKT-104: Stale Subscription State in Navbar and Packages Page Until Hard Refresh
+
+- **Layer:** Frontend (`web/`)
+- **Status:** Resolved
+- **Fix Report:** [TKT-104-fix-report.md](./docs/issues/TKT-104/TKT-104-fix-report.md)
+- **Root Cause:** `useSubscriptionStatus` set `staleTime: Number.POSITIVE_INFINITY` and ran unconditionally even when logged out; `useLogin`, `useRegister`, `useCompleteMeme`, and `useDeleteMeme` did not invalidate `queryKeys.subscription`.
+- **Solution:** Extracted `queryKeys` into `web/src/lib/query-keys.ts`, configured `useSubscriptionStatus` with `staleTime: 0`, `refetchOnWindowFocus: true`, `retry: false`, and `enabled: Boolean(user)`, added `queryKeys.subscription` invalidation to auth and meme mutations, and guarded `/studio` with `me.isLoading || (me.data && status.isPending)`.

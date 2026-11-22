@@ -1,5 +1,6 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, unwrap } from "@/lib/api";
+import { queryKeys } from "@/lib/query-keys";
 import type { ApiEnvelope } from "@/lib/types";
 
 export interface AuthUser {
@@ -18,9 +19,17 @@ interface AuthInput {
   name?: string;
 }
 
+export function invalidateAuthQueries(qc: QueryClient) {
+  return Promise.all([
+    qc.invalidateQueries({ queryKey: queryKeys.me }),
+    qc.invalidateQueries({ queryKey: queryKeys.subscription }),
+    qc.invalidateQueries({ queryKey: ["memes"] }),
+  ]);
+}
+
 export function useMe() {
   return useQuery({
-    queryKey: ["me"],
+    queryKey: queryKeys.me,
     queryFn: async () => unwrap<AuthUser>(await api.get("/api/v1/auth/me")),
     retry: false,
   });
@@ -36,7 +45,7 @@ export function useRegister() {
       );
       return res.data;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }),
+    onSuccess: () => invalidateAuthQueries(qc),
   });
 }
 
@@ -50,7 +59,7 @@ export function useLogin() {
       );
       return res.data;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }),
+    onSuccess: () => invalidateAuthQueries(qc),
   });
 }
 

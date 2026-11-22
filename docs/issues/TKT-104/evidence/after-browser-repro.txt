@@ -1,0 +1,19 @@
+TKT-104 After-Fix Verification Evidence
+=====================================
+Date: 2026-11-23
+Environment: Next.js dev server (http://localhost:3001) + Go API (http://localhost:8080)
+
+1. Unauthenticated visit to http://localhost:3001/ and http://localhost:3001/pricing:
+   - Observed: ZERO GET /api/v1/subscription/status requests fired while logged out.
+   - Only GET /api/v1/auth/me fired (auth-gating enabled: Boolean(user) prevented unauthenticated 401 + refresh-token churn).
+
+2. Automated Regression Tests (web/src/lib/subscription-cache.test.ts):
+   - subscriptionStatusQueryOptions(false): enabled === false, staleTime === 0, refetchOnWindowFocus === true, retry === false (PASS)
+   - subscriptionStatusQueryOptions(true): enabled === true, staleTime === 0, refetchOnWindowFocus === true, retry === false (PASS)
+   - invalidateAuthQueries(qc): invalidates me, subscription, and memes (PASS)
+   - invalidateSubscriptionQuery(qc): invalidates subscription (PASS)
+   - invalidateMemeQueries(qc): invalidates memes and subscription (PASS)
+
+3. Note on live checkout/CORS:
+   - Checkout via browser on :3000 was blocked by TKT-105's CORS Idempotency-Key header issue (out of scope for TKT-104).
+   - Backend subscription activation for tkt104_after_repro@example.com was confirmed via API (status: "active", plan: "premium_1d").

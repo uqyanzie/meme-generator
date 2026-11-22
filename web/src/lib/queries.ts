@@ -1,9 +1,13 @@
 import {
+  type QueryClient,
+  queryOptions,
   useMutation,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
 import { api, unwrap } from "@/lib/api";
+import { useMe } from "@/lib/auth";
+import { queryKeys } from "@/lib/query-keys";
 import type {
   CheckoutResponse,
   Meme,
@@ -12,11 +16,7 @@ import type {
   UploadResponse,
 } from "@/lib/types";
 
-export const queryKeys = {
-  plans: ["plans"] as const,
-  subscription: ["subscription"] as const,
-  memes: (limit: number, offset: number) => ["memes", limit, offset] as const,
-};
+export { queryKeys } from "@/lib/query-keys";
 
 export function usePlans() {
   return useQuery({
@@ -26,15 +26,32 @@ export function usePlans() {
   });
 }
 
-export function useSubscriptionStatus() {
-  return useQuery({
+export function subscriptionStatusQueryOptions(enabled: boolean) {
+  return queryOptions({
     queryKey: queryKeys.subscription,
     queryFn: async () =>
       unwrap<SubscriptionStatus>(await api.get("/api/v1/subscription/status")),
-    // BUG: status dianggap abadi — setelah beli/expired, UI tidak pernah
-    // mengambil ulang sampai invalidate manual / reload penuh.
-    staleTime: Number.POSITIVE_INFINITY,
+    enabled,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+    retry: false,
   });
+}
+
+export function useSubscriptionStatus() {
+  const { data: user } = useMe();
+  return useQuery(subscriptionStatusQueryOptions(Boolean(user)));
+}
+
+export function invalidateSubscriptionQuery(qc: QueryClient) {
+  return qc.invalidateQueries({ queryKey: queryKeys.subscription });
+}
+
+export function invalidateMemeQueries(qc: QueryClient) {
+  return Promise.all([
+    qc.invalidateQueries({ queryKey: ["memes"] }),
+    qc.invalidateQueries({ queryKey: queryKeys.subscription }),
+  ]);
 }
 
 export function useCheckout() {
@@ -52,7 +69,7 @@ export function useCheckout() {
           },
         }),
       ),
-    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.subscription }),
+    onSuccess: () => invalidateSubscriptionQuery(qc),
   });
 }
 
@@ -65,7 +82,7 @@ export function useConfirmPayment() {
           `/api/v1/subscription/payments/${reference}/confirm`,
         ),
       ),
-    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.subscription }),
+    onSuccess: () => invalidateSubscriptionQuery(qc),
   });
 }
 
@@ -97,7 +114,7 @@ export function useCompleteMeme() {
           resultUrl: input.resultUrl,
         }),
       ),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["memes"] }),
+    onSuccess: () => invalidateMemeQueries(qc),
   });
 }
 
@@ -105,6 +122,6 @@ export function useDeleteMeme() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => api.delete(`/api/v1/memes/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["memes"] }),
+    onSuccess: () => invalidateMemeQueries(qc),
   });
 }
