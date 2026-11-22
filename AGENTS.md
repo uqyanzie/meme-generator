@@ -12,9 +12,9 @@ Subscription-based meme generator being hardened by resolving 9 user-reported pr
 
 ## Workflow & Engineering Rules
 
-1. **Follow EDD (Error-Driven Development):**
-   - Always activate the `edd-resolve` skill (`.agents/skills/edd-resolve/SKILL.md`) when resolving any `TKT-XXX` ticket.
-   - Never jump straight to editing code: first read `docs/issues/TKT-XXX/TKT-XXX.md`, align on any **Pending Decisions** with the user, reproduce the failure (Before evidence), write `TKT-XXX-plan.md`, implement the minimal fix, and verify (After evidence).
+1. **Follow 2-Phase EDD (Error-Driven Development):**
+   - **Phase 1 — Investigate, Reproduce & Plan (`edd-plan`):** Activate `.agents/skills/edd-plan/SKILL.md` to read `docs/issues/TKT-XXX/TKT-XXX.md`, align on any **Pending Decisions**, capture verbatim **Before** reproduction evidence under `docs/issues/TKT-XXX/evidence/`, and write `TKT-XXX-plan.md` — **without editing application code**. Always hold for plan review before moving to Phase 2.
+   - **Phase 2 — Implement, Verify, Report & Commit (`edd-implement`):** Activate `.agents/skills/edd-implement/SKILL.md` to execute an approved `TKT-XXX-plan.md` using Red→Green regression tests, run verification gates & live **After** checks, write `TKT-XXX-fix-report.md` (synced to `FIX_REPORT.md` and `docs/Issue.md`), **pause for a quick diff review**, and then create the atomic `fix(TKT-XXX): ...` commit.
 2. **Respect Ticket Scope & Commit Hygiene:**
    - **One atomic commit per issue** for bugfixes (`fix(TKT-XXX): ...`), with a body summarizing root cause and solution.
    - Do not fold fixes for unrelated tickets into the current ticket's diff.
