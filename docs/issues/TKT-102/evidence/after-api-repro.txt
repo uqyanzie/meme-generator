@@ -1,0 +1,107 @@
+# TKT-102 After Verification — Live API (http://localhost:18080, rebuilt post-fix binary)
+Captured (UTC): 2026-11-22T14:28:39.0024572Z
+Test user: tkt102-after-1795357718@example.com
+
+--- 1. Unauthenticated GET /api/v1/subscription/status ---
+HTTP/1.1 401 Unauthorized
+Access-Control-Allow-Credentials: true
+Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With
+Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS
+Access-Control-Allow-Origin: http://localhost:3000
+Access-Control-Max-Age: 86400
+Cache-Control: private, no-store
+Content-Type: application/json
+Vary: Origin
+Vary: Cookie
+Vary: Authorization
+Date: Sun, 22 Nov 2026 14:28:39 GMT
+Content-Length: 55
+
+{"success":false,"code":10002,"message":"unauthorized"}
+
+--- 2. Register test user (POST /api/v1/auth/register) ---
+Register response: {"success":true,"code":10101,"message":"registrasi berhasil","data":{"user":{"id":"8bc67ba2-2ea2-43c3-aa9c-4a999a4946a9","email":"tkt102-after-1795357718@example.com","name":"TKT102 After","role":"user"},"token":{"accessToken":"<redacted-jwt>","refreshToken":"<redacted-jwt>","expiresIn":900}}}
+
+--- 3. Authenticated GET /api/v1/subscription/status (BEFORE payment) ---
+HTTP/1.1 200 OK
+Access-Control-Allow-Credentials: true
+Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With
+Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS
+Access-Control-Allow-Origin: http://localhost:3000
+Access-Control-Max-Age: 86400
+Cache-Control: private, no-store
+Content-Type: application/json
+Vary: Origin
+Vary: Cookie
+Vary: Authorization
+Date: Sun, 22 Nov 2026 14:28:39 GMT
+Content-Length: 114
+
+{"success":true,"code":20104,"message":"status langganan","data":{"subscribed":false,"memesUsed":0,"maxMemes":0}}
+
+--- 4. Checkout & Confirm payment ---
+Checkout reference: 342f9c306459c6372ce8e101
+Confirm response: {"success":true,"code":20103,"message":"pembayaran terkonfirmasi","data":{"payment":{"id":"0f630f0d-9fad-43bf-8e91-d1150c474ef4","subscriptionId":"e74f966d-a825-49e2-9c05-172fb5eec8b9","amountIdr":5000,"status":"paid","reference":"342f9c306459c6372ce8e101"},"subscription":{"id":"e74f966d-a825-49e2-9c05-172fb5eec8b9","userId":"8bc67ba2-2ea2-43c3-aa9c-4a999a4946a9","planId":"a48e2cce-75de-4c88-b96a-81e6f6b6b421","status":"active","startsAt":"2026-11-22T21:28:39.577849+07:00","endsAt":"2026-11-23T21:28:39.577849+07:00"}}}
+
+--- 5. Authenticated GET /api/v1/subscription/status (AFTER payment) ---
+HTTP/1.1 200 OK
+Access-Control-Allow-Credentials: true
+Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With
+Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS
+Access-Control-Allow-Origin: http://localhost:3000
+Access-Control-Max-Age: 86400
+Cache-Control: private, no-store
+Content-Type: application/json
+Vary: Origin
+Vary: Cookie
+Vary: Authorization
+Date: Sun, 22 Nov 2026 14:28:39 GMT
+Content-Length: 216
+
+{"success":true,"code":20104,"message":"status langganan","data":{"subscribed":true,"status":"active","planCode":"premium_1d","planName":"Premium 1 Hari","endsAt":"2026-11-23T14:28:39Z","memesUsed":0,"maxMemes":10}}
+
+--- 6. Audit other authenticated GET endpoints (GET /api/v1/auth/me) ---
+HTTP/1.1 200 OK
+Access-Control-Allow-Credentials: true
+Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With
+Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS
+Access-Control-Allow-Origin: http://localhost:3000
+Access-Control-Max-Age: 86400
+Cache-Control: private, no-store
+Content-Type: application/json
+Vary: Origin
+Vary: Cookie
+Vary: Authorization
+Date: Sun, 22 Nov 2026 14:28:39 GMT
+Content-Length: 189
+
+{"success":true,"code":10105,"message":"profil user","data":{"id":"8bc67ba2-2ea2-43c3-aa9c-4a999a4946a9","email":"tkt102-after-1795357718@example.com","name":"TKT102 After","role":"user"}}
+
+--- 7. Audit other authenticated GET endpoints (GET /api/v1/memes) ---
+HTTP/1.1 200 OK
+Access-Control-Allow-Credentials: true
+Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With
+Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS
+Access-Control-Allow-Origin: http://localhost:3000
+Access-Control-Max-Age: 86400
+Cache-Control: private, no-store
+Content-Type: application/json
+Vary: Origin
+Vary: Cookie
+Vary: Authorization
+Date: Sun, 22 Nov 2026 14:28:39 GMT
+Content-Length: 84
+
+{"success":true,"code":30102,"message":"daftar meme","data":{"items":[],"total":0}}
+
+--- 8. Audit public GET endpoint (GET /api/v1/subscription/plans) ---
+HTTP/1.1 200 OK
+Access-Control-Allow-Credentials: true
+Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With
+Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS
+Access-Control-Allow-Origin: http://localhost:3000
+Access-Control-Max-Age: 86400
+Content-Type: application/json
+Vary: Origin
+Date: Sun, 22 Nov 2026 14:28:39 GMT
+Content-Length: 843

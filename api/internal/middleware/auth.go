@@ -24,6 +24,12 @@ func UserIDFromContext(ctx context.Context) (string, bool) {
 func Auth(tokens *token.Manager) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Respons endpoint terautentikasi (termasuk 401) berisi atau bergantung pada kredensial user —
+			// jangan pernah izinkan shared cache / browser HTTP cache menyimpannya.
+			w.Header().Set("Cache-Control", "private, no-store")
+			w.Header().Add("Vary", "Cookie")
+			w.Header().Add("Vary", "Authorization")
+
 			raw := ""
 			if header := r.Header.Get("Authorization"); strings.HasPrefix(header, "Bearer ") {
 				raw = strings.TrimSpace(strings.TrimPrefix(header, "Bearer "))

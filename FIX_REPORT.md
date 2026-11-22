@@ -17,3 +17,18 @@ Clicking **Keluar (Logout)** previously failed to delete auth cookies (wrong `Pa
 - **Backend:** Set `HttpOnly: true` in `cookie.Set`; cleared both auth cookies on `Path: "/"` via `cookie.Clear`; added unique `jti` claims and a Redis access-token denylist (`auth:revoked:access:<jti>`) checked in `VerifyAccess(ctx, raw)`; removed `authMW` from `POST /api/v1/auth/logout` so logout is idempotent and always clears cookies.
 - **Frontend:** Removed the forced `/login` redirect from `/`; replaced `document.cookie` redirects in `/login` and `/register` with guarded `useMe()` checks; invalidated `["me"]` in `useRegister`; switched `useLogout` cleanup to `onSettled`.
 - **Verification:** Added Go regression tests (`cookie_test.go`, `jwt_test.go`, `handler_test.go`), passed `go vet`, `go test`, `go build`, `bun run check`, `bun run lint`, and verified live Before vs. After API behavior (`docs/issues/TKT-103/evidence/after-api-repro.txt`).
+
+---
+
+## TKT-102: Inconsistent Subscription Status and Cross-User Data Leakage
+
+- **Status:** Resolved
+- **Detailed Report:** [docs/issues/TKT-102/TKT-102-fix-report.md](./docs/issues/TKT-102/TKT-102-fix-report.md)
+- **Layer:** Backend
+
+### Summary
+`GET /api/v1/subscription/status` previously emitted `Cache-Control: public, max-age=86400` without varying on authentication credentials (`Vary: Origin` only). This allowed shared caches (office Wi-Fi proxies/CDNs) to leak one user's subscription status and quota to other users—including unauthenticated visitors—and caused users' browsers to serve stale pre-payment `"subscribed": false` responses from HTTP disk cache across tab reopens.
+
+### Solution
+- **Backend:** Removed the inline `Cache-Control: public, max-age=86400` wrapper from `GET /api/v1/subscription/status` in `api/internal/modules/subscription/mount.go`; enforced `Cache-Control: private, no-store` and appended `Vary: Cookie` and `Vary: Authorization` at the entry of `middleware.Auth` (`api/internal/middleware/auth.go`), protecting all authenticated endpoints (including `401` responses) while preserving `Vary: Origin` from `middleware.CORS` and leaving public routes untouched.
+- **Verification:** Added Go regression tests (`api/internal/middleware/auth_test.go`, `api/internal/modules/subscription/mount_test.go`), passed `go vet`, `go test`, `go build`, `bun run check`, `bun run lint`, and verified live Before vs. After API behavior (`docs/issues/TKT-102/evidence/after-api-repro.txt`).
