@@ -93,3 +93,14 @@ Clicking **Bayar Sekarang (Simulasi)** on `/checkout/[reference]` previously swa
 - **Summary:** Any authenticated user could overwrite another user's meme result URL (`POST /api/v1/memes/{id}/complete`) or delete another user's meme (`DELETE /api/v1/memes/{id}`) because `Repository.GetByID`, `Repository.SetResultURL`, and `Repository.Delete` ignored `userID`. Additionally, `GetByID` selected 10 columns into 9 `Scan` arguments, breaking `POST /api/v1/memes/{id}/result-upload` with `500` for everyone.
 - **Changes:** Enforced `WHERE id = $1 AND user_id = $2` (and `$3` for `SetResultURL`) across all three repository methods, fixed the 9-column `GetByID` scan, mapped malformed UUIDs (`22P02`) to `404 Not Found`, and added best-effort Garage S3 object cleanup in `Service.Delete`.
 - **Verification:** Added Go regression tests (`api/internal/modules/meme/repository_test.go`, `api/internal/modules/meme/service_test.go`), passed `go vet`, `go test`, `go build`, `bun run check`, `bun run lint`, and verified live Before vs. After two-user API & S3 cleanup behavior (`docs/issues/TKT-107/evidence/after-api-repro.txt`).
+
+---
+
+## TKT-108: Arbitrary / Malicious File Uploads in S3 Storage
+
+- **Status:** Resolved
+- **Detailed Report:** [docs/issues/TKT-108/TKT-108-fix-report.md](./docs/issues/TKT-108/TKT-108-fix-report.md)
+- **Layer:** Backend + Frontend
+- **Summary:** Subscribers could previously upload arbitrary, oversized, or malicious files (`.html`, `.exe`, `.zip`, 6 MiB+ blobs) directly into Garage S3 because `Service.PrepareUpload` never called `allowedExt`, trusted raw client `contentType`, and neither `PrepareUpload` nor `ResultUpload` validated `fileSize` or signed `ContentLength` into S3 presigned PUT URLs.
+- **Changes:** Enforced canonical extension allowlist (`.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`), exact extension-to-MIME matching, and a 5 MiB (`5 << 20`) file size cap on both `PrepareUpload` and `ResultUpload` (mapped to `400` / `30002` and `413` / `30003`, validated before DB insertion), signed both `ContentLength` and `ContentType` into Garage S3 presigned PUT URLs, and added matching client-side validation + `contentType`/`fileSize` payloads in `web/src/lib/queries.ts` and `web/src/app/studio/page.tsx`.
+- **Verification:** Added Go regression tests (`api/internal/modules/meme/handler_test.go`, `api/internal/modules/meme/service_test.go`), passed `go vet`, `go build`, `bun run check`, `bun run lint`, and verified live Before vs. After API + Garage S3 SigV4 tamper rejection (`docs/issues/TKT-108/evidence/after-api-repro.txt`).

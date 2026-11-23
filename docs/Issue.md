@@ -17,7 +17,7 @@ We resolve tickets using **Repro-Test-First EDD (Error-Driven Development)** in 
 | 5 | [TKT-105](./issues/TKT-105/TKT-105.md) | Duplicate Checkout / Double Billing Creation | Frontend + Backend | Checkout flow | Resolved | Resolved | — |
 | 6 | [TKT-106](./issues/TKT-106/TKT-106.md) | Unresponsive "Pay Now" Button Without Feedback | Frontend (+ Backend verify) | Checkout flow | Resolved | Resolved | — |
 | 7 | [TKT-107](./issues/TKT-107/TKT-107.md) | Unauthorized Viewing & Deletion of Other Users' Memes (IDOR) | Backend | Unblocks `ResultUpload` (`GetByID` scan bug) | Resolved | Resolved | — |
-| 8 | [TKT-108](./issues/TKT-108/TKT-108.md) | Arbitrary / Malicious File Uploads in S3 Storage | Backend + Frontend | Meme upload flow | Presigned `Content-Length` vs API-proxied upload | Open | — |
+| 8 | [TKT-108](./issues/TKT-108/TKT-108.md) | Arbitrary / Malicious File Uploads in S3 Storage | Backend + Frontend | Meme upload flow | Resolved | Resolved | — |
 | 9 | [TKT-109](./issues/TKT-109/TKT-109.md) | Quota Bypass via Concurrent Requests (Race Condition) | Backend | Final meme creation flow | Locking strategy + final-meme completion edge case | Open | — |
 
 ---

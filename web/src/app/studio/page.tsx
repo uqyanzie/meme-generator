@@ -101,11 +101,50 @@ function drawMeme(
   }
 }
 
-async function putToS3(uploadUrl: string, blob: Blob) {
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+const EXT_TO_MIME: Record<string, string> = {
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+};
+
+function validateSelectedFile(
+  file: File,
+): { ok: true; contentType: string } | { ok: false; error: string } {
+  const dotIdx = file.name.lastIndexOf(".");
+  const ext = dotIdx >= 0 ? file.name.slice(dotIdx).toLowerCase() : "";
+  const expectedMime = EXT_TO_MIME[ext];
+  if (!expectedMime) {
+    return {
+      ok: false,
+      error: "Format gambar harus JPG, PNG, GIF, atau WebP.",
+    };
+  }
+  if (file.type) {
+    const normalizedType = file.type.split(";")[0].trim().toLowerCase();
+    if (normalizedType !== expectedMime) {
+      return {
+        ok: false,
+        error: "Tipe file tidak cocok dengan ekstensi gambar.",
+      };
+    }
+  }
+  if (file.size <= 0) {
+    return { ok: false, error: "File gambar tidak valid." };
+  }
+  if (file.size > MAX_UPLOAD_BYTES) {
+    return { ok: false, error: "Ukuran file melebihi batas maksimum 5 MB." };
+  }
+  return { ok: true, contentType: expectedMime };
+}
+
+async function putToS3(uploadUrl: string, blob: Blob, contentType: string) {
   const res = await fetch(uploadUrl, {
     method: "PUT",
     body: blob,
-    headers: { "Content-Type": blob.type },
+    headers: { "Content-Type": contentType },
   });
   if (!res.ok) throw new Error(`upload ke S3 gagal: ${res.status}`);
 }
@@ -152,6 +191,11 @@ export default function StudioPage() {
       setError("Pilih gambar dasar dulu.");
       return;
     }
+    const validated = validateSelectedFile(file);
+    if (!validated.ok) {
+      setError(validated.error);
+      return;
+    }
     setBusy(true);
     try {
       // Pastikan fallback font (Anton) sudah termuat sebelum dirender ke canvas.
@@ -165,9 +209,14 @@ export default function StudioPage() {
       imgRef.current = img;
 
       // 1) presign gambar dasar
-      const prepared = await prepare.mutateAsync({ title, filename: file.name });
+      const prepared = await prepare.mutateAsync({
+        title,
+        filename: file.name,
+        contentType: validated.contentType,
+        fileSize: file.size,
+      });
       // 2) unggah gambar dasar ke Garage
-      await putToS3(prepared.uploadUrl, file);
+      await putToS3(prepared.uploadUrl, file, validated.contentType);
 
       // 3) render hasil ke PNG
       const resultCanvas = document.createElement("canvas");
@@ -178,12 +227,17 @@ export default function StudioPage() {
           "image/png",
         ),
       );
+      if (blob.size > MAX_UPLOAD_BYTES) {
+        throw new Error("Ukuran hasil render melebihi batas maksimum 5 MB.");
+      }
 
       // 4) presign + unggah hasil
       const result = unwrap<ResultUploadData>(
-        await api.post(`/api/v1/memes/${prepared.id}/result-upload`),
+        await api.post(`/api/v1/memes/${prepared.id}/result-upload`, {
+          fileSize: blob.size,
+        }),
       );
-      await putToS3(result.uploadUrl, blob);
+      await putToS3(result.uploadUrl, blob, "image/png");
 
       // 5) complete
       await complete.mutateAsync({ id: prepared.id, resultUrl: result.baseUrl });
@@ -288,11 +342,19 @@ export default function StudioPage() {
               <Input
                 id="image"
                 type="file"
-                accept="image/*"
+                accept=".jpg,.jpeg,.png,.gif,.webp,image/jpeg,image/png,image/gif,image/webp"
                 ref={fileRef}
                 onChange={() => {
                   const file = fileRef.current?.files?.[0];
                   if (!file) return;
+                  const validated = validateSelectedFile(file);
+                  if (!validated.ok) {
+                    setError(validated.error);
+                    if (fileRef.current) fileRef.current.value = "";
+                    imgRef.current = null;
+                    return;
+                  }
+                  setError("");
                   const img = new Image();
                   img.onload = () => {
                     imgRef.current = img;

@@ -125,3 +125,108 @@ func TestService_Delete_BestEffortS3Cleanup(t *testing.T) {
 	}
 	mu.Unlock()
 }
+
+func TestService_PrepareUpload_Validation(t *testing.T) {
+	pool := newTestPool(t)
+	ctx := context.Background()
+	repo := meme.NewPostgresRepository(pool)
+	userID := seedTestUser(t, pool, "prepare-validation")
+
+	svc := meme.NewService(repo, newStubS3Client(t, "http://localhost:3900"), config.StorageConfig{
+		Bucket:        "meme-portal",
+		PublicBaseURL: "http://localhost:3902/meme-portal",
+	}, stubGate{})
+
+	const maxBytes int64 = 5 << 20
+
+	invalidCases := []struct {
+		name        string
+		ext         string
+		contentType string
+		fileSize    int64
+		wantErr     error
+	}{
+		{"html ext", ".html", "text/html", 64, meme.ErrInvalidFile},
+		{"exe ext", ".exe", "application/octet-stream", 1024, meme.ErrInvalidFile},
+		{"zip ext", ".zip", "application/zip", 1024, meme.ErrInvalidFile},
+		{"svg ext", ".svg", "image/svg+xml", 512, meme.ErrInvalidFile},
+		{"empty ext", "", "image/png", 512, meme.ErrInvalidFile},
+		{"png ext with text/html", ".png", "text/html", 512, meme.ErrInvalidFile},
+		{"jpg ext with image/png", ".jpg", "image/png", 512, meme.ErrInvalidFile},
+		{"empty contentType", ".png", "", 512, meme.ErrInvalidFile},
+		{"zero fileSize", ".png", "image/png", 0, meme.ErrInvalidFile},
+		{"negative fileSize", ".png", "image/png", -1, meme.ErrInvalidFile},
+		{"oversized fileSize", ".png", "image/png", maxBytes + 1, meme.ErrFileTooLarge},
+	}
+
+	for _, tc := range invalidCases {
+		t.Run("reject/"+tc.name, func(t *testing.T) {
+			_, err := svc.PrepareUpload(ctx, userID, tc.name, tc.ext, tc.contentType, tc.fileSize)
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("PrepareUpload(%q, %q, %d) err = %v, want %v", tc.ext, tc.contentType, tc.fileSize, err, tc.wantErr)
+			}
+		})
+	}
+
+	validCases := []struct {
+		name        string
+		ext         string
+		contentType string
+		fileSize    int64
+	}{
+		{"jpg", ".jpg", "image/jpeg", 1024},
+		{"uppercase JPEG + MIME", ".JPEG", "IMAGE/JPEG", maxBytes},
+		{"png with params", ".png", "image/png; charset=binary", maxBytes},
+		{"gif", ".gif", "image/gif", 2048},
+		{"webp", ".webp", "image/webp", 4096},
+	}
+
+	for _, tc := range validCases {
+		t.Run("accept/"+tc.name, func(t *testing.T) {
+			res, err := svc.PrepareUpload(ctx, userID, tc.name, tc.ext, tc.contentType, tc.fileSize)
+			if err != nil {
+				t.Fatalf("PrepareUpload(%q, %q, %d) unexpected err: %v", tc.ext, tc.contentType, tc.fileSize, err)
+			}
+			assertSignedHeaders(t, res.UploadURL, "content-length", "content-type")
+		})
+	}
+}
+
+func TestService_ResultUpload_Validation(t *testing.T) {
+	pool := newTestPool(t)
+	ctx := context.Background()
+	repo := meme.NewPostgresRepository(pool)
+	userID := seedTestUser(t, pool, "result-validation")
+
+	svc := meme.NewService(repo, newStubS3Client(t, "http://localhost:3900"), config.StorageConfig{
+		Bucket:        "meme-portal",
+		PublicBaseURL: "http://localhost:3902/meme-portal",
+	}, stubGate{})
+
+	const maxBytes int64 = 5 << 20
+
+	m, err := repo.Create(ctx, meme.Meme{
+		UserID:       userID,
+		Title:        "Owned",
+		BaseImageURL: "http://localhost:3902/meme-portal/base/abc.png",
+	})
+	if err != nil {
+		t.Fatalf("create meme: %v", err)
+	}
+
+	if _, err := svc.ResultUpload(ctx, userID, m.ID, 0); !errors.Is(err, meme.ErrInvalidFile) {
+		t.Fatalf("expected ErrInvalidFile for size 0, got %v", err)
+	}
+	if _, err := svc.ResultUpload(ctx, userID, m.ID, -5); !errors.Is(err, meme.ErrInvalidFile) {
+		t.Fatalf("expected ErrInvalidFile for size -5, got %v", err)
+	}
+	if _, err := svc.ResultUpload(ctx, userID, m.ID, maxBytes+1); !errors.Is(err, meme.ErrFileTooLarge) {
+		t.Fatalf("expected ErrFileTooLarge for size maxBytes+1, got %v", err)
+	}
+
+	res, err := svc.ResultUpload(ctx, userID, m.ID, maxBytes)
+	if err != nil {
+		t.Fatalf("ResultUpload at boundary failed: %v", err)
+	}
+	assertSignedHeaders(t, res.UploadURL, "content-length", "content-type")
+}

@@ -1,0 +1,36 @@
+﻿=== TKT-108 After Verification (Fixed API + Live Garage S3) ===
+Timestamp: 2026-11-24T00:20:32.2453619+07:00
+
+--- 1. Register & Subscribe (tkt108-after-1973029770@example.com) ---
+POST /api/v1/auth/register -> HTTP 201
+POST /api/v1/subscription/payments/5af8930da2811ca3c90acd36/confirm -> HTTP 200
+
+--- 2. Rejected Malicious / Disallowed / Spoofed / Oversized PrepareUpload ---
+POST /api/v1/memes/upload (payload.html (text/html, 64 B)) -> HTTP 400
+Body: {"success":false,"code":30002,"message":"file gambar tidak valid"}
+POST /api/v1/memes/upload (GTA.V.Full.Installer.zip (application/zip, 1024 B)) -> HTTP 400
+Body: {"success":false,"code":30002,"message":"file gambar tidak valid"}
+POST /api/v1/memes/upload (malware.exe (application/octet-stream, 1024 B)) -> HTTP 400
+Body: {"success":false,"code":30002,"message":"file gambar tidak valid"}
+POST /api/v1/memes/upload (spoof.png (text/html, 1024 B)) -> HTTP 400
+Body: {"success":false,"code":30002,"message":"file gambar tidak valid"}
+POST /api/v1/memes/upload (huge.png (image/png, 6 MiB)) -> HTTP 413
+Body: {"success":false,"code":30003,"message":"ukuran file melebihi batas maksimum 5 MB"}
+
+--- 3. Valid PrepareUpload (ok.png, image/png, 68 B) + Garage S3 SigV4 Enforcement ---
+POST /api/v1/memes/upload (ok.png, image/png, 70 B) -> HTTP 201
+Base presigned URL: http://localhost:3900/meme-portal/base/7eeee3436bfb50905c7520e9.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=GK4f8e1c2a9b3d7e6051c2f3a4b5c6d7e8%2F20261123%2Fgarage%2Fs3%2Faws4_request&X-Amz-Date=20261123T172032Z&X-Amz-Expires=900&X-Amz-SignedHeaders=content-length%3Bcontent-type%3Bhost&x-id=PutObject&X-Amz-Signature=<redacted>
+Tampered PUT (200 B, image/png) to Garage S3 -> HTTP 403 (<?xml version="1.0" encoding="UTF-8"?><Error><Code>AccessDenied</Code><Message>Forbidden: Invalid signature</Message><Resource>/meme-portal/base/7eeee3436bfb50905c7520e9.png</Resource><Region>garage</Region></Error>)
+Tampered PUT (70 B, text/html) to Garage S3 -> HTTP 403 (<?xml version="1.0" encoding="UTF-8"?><Error><Code>AccessDenied</Code><Message>Forbidden: Invalid signature</Message><Resource>/meme-portal/base/7eeee3436bfb50905c7520e9.png</Resource><Region>garage</Region></Error>)
+Valid PUT (70 B, image/png) to Garage S3 -> HTTP 200
+
+--- 4. ResultUpload Size Limit & Garage S3 SigV4 Enforcement ---
+POST /api/v1/memes/13f3ef0e-face-46d2-8a44-d5159f5e8f24/result-upload (6 MiB) -> HTTP 413
+Body: {"success":false,"code":30003,"message":"ukuran file melebihi batas maksimum 5 MB"}
+POST /api/v1/memes/13f3ef0e-face-46d2-8a44-d5159f5e8f24/result-upload (70 B) -> HTTP 200
+Result presigned URL: http://localhost:3900/meme-portal/result/13f3ef0e-face-46d2-8a44-d5159f5e8f24.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=GK4f8e1c2a9b3d7e6051c2f3a4b5c6d7e8%2F20261123%2Fgarage%2Fs3%2Faws4_request&X-Amz-Date=20261123T172034Z&X-Amz-Expires=900&X-Amz-SignedHeaders=content-length%3Bcontent-type%3Bhost&x-id=PutObject&X-Amz-Signature=<redacted>
+Tampered Result PUT (200 B, image/png) to Garage S3 -> HTTP 403 (<?xml version="1.0" encoding="UTF-8"?><Error><Code>AccessDenied</Code><Message>Forbidden: Invalid signature</Message><Resource>/meme-portal/result/13f3ef0e-face-46d2-8a44-d5159f5e8f24.png</Resource><Region>garage</Region></Error>)
+Valid Result PUT (70 B, image/png) to Garage S3 -> HTTP 200
+
+--- 5. Cleanup Test Meme ---
+DELETE /api/v1/memes/13f3ef0e-face-46d2-8a44-d5159f5e8f24 -> HTTP 200

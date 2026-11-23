@@ -1,0 +1,35 @@
+﻿=== TKT-108 Before Reproduction (Unmodified API + Garage S3) ===
+Timestamp: 2026-11-24T00:06:15.7305491+07:00
+
+--- 1. Register & Subscribe (tkt108-before-1795453575@example.com) ---
+POST /api/v1/auth/register -> HTTP 201
+POST /api/v1/subscription/payments/00bffe3738b392b4a164f678/confirm -> HTTP 200
+
+--- 2. Malicious HTML Upload (.html + text/html) ---
+POST /api/v1/memes/upload (payload.html, text/html) -> HTTP 201
+Body: {"success":true,"code":30106,"message":"upload disiapkan","data":{"id":"e7aae424-393f-424c-8005-730fd258518b","uploadUrl":"http://localhost:3900/meme-portal/base/86f63a4b6c60ce1076af06a1.html?X-Amz-Algorithm=AWS4-HMAC-SHA256\u0026X-Amz-Credential=GK4f8e1c2a9b3d7e6051c2f3a4b5c6d7e8%2F20261123%2Fgarage%2Fs3%2Faws4_request\u0026X-Amz-Date=20261123T170616Z\u0026X-Amz-Expires=900\u0026X-Amz-SignedHeaders=content-type%3Bhost\u0026x-id=PutObject\u0026X-Amz-Signature=e262fce1231771e677b3b2d8e2d513c07aa294138f625a17d82184b97e25d117","baseUrl":"http://meme-portal.web.garage.localhost:3902/base/86f63a4b6c60ce1076af06a1.html"}}
+
+PUT presigned URL (payload.html, text/html) -> HTTP 200 (STORED IN GARAGE S3!)
+
+--- 3. Disallowed Archive & Executable Uploads (.zip, .exe) ---
+POST /api/v1/memes/upload (GTA.V.Full.Installer.zip, application/zip) -> HTTP 201
+Body: {"success":true,"code":30106,"message":"upload disiapkan","data":{"id":"0930d0b1-7c4a-498b-b5c4-d158d7891056","uploadUrl":"http://localhost:3900/meme-portal/base/f3ae595b73cf0a5508fecbb4.zip?X-Amz-Algorithm=AWS4-HMAC-SHA256\u0026X-Amz-Credential=GK4f8e1c2a9b3d7e6051c2f3a4b5c6d7e8%2F20261123%2Fgarage%2Fs3%2Faws4_request\u0026X-Amz-Date=20261123T170618Z\u0026X-Amz-Expires=900\u0026X-Amz-SignedHeaders=content-type%3Bhost\u0026x-id=PutObject\u0026X-Amz-Signature=ccc87c8a1f939c8e9cde362590af23019c5fb16e41103ae80824a54ae9683c6c","baseUrl":"http://meme-portal.web.garage.localhost:3902/base/f3ae595b73cf0a5508fecbb4.zip"}}
+
+POST /api/v1/memes/upload (malware.exe, application/octet-stream) -> HTTP 201
+Body: {"success":true,"code":30106,"message":"upload disiapkan","data":{"id":"be7e8971-1e1d-44ab-bd3e-6995183837c5","uploadUrl":"http://localhost:3900/meme-portal/base/e7b06e7b6d4e197845b90343.exe?X-Amz-Algorithm=AWS4-HMAC-SHA256\u0026X-Amz-Credential=GK4f8e1c2a9b3d7e6051c2f3a4b5c6d7e8%2F20261123%2Fgarage%2Fs3%2Faws4_request\u0026X-Amz-Date=20261123T170618Z\u0026X-Amz-Expires=900\u0026X-Amz-SignedHeaders=content-type%3Bhost\u0026x-id=PutObject\u0026X-Amz-Signature=34b7fa468ebf4ccf2ae8b928b52e3dcd2ab64fef82794a1efbb2832e0a476820","baseUrl":"http://meme-portal.web.garage.localhost:3902/base/e7b06e7b6d4e197845b90343.exe"}}
+
+PUT presigned URL (malware.exe, application/octet-stream) -> HTTP 200 (STORED IN GARAGE S3!)
+
+--- 4. Oversized Upload (6 MiB > 5 MiB) on PrepareUpload & ResultUpload ---
+POST /api/v1/memes/upload (huge.png, no size limit) -> HTTP 201
+Base presigned URL: http://localhost:3900/meme-portal/base/de69b8add084bc398a11c6a4.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=GK4f8e1c2a9b3d7e6051c2f3a4b5c6d7e8%2F20261123%2Fgarage%2Fs3%2Faws4_request&X-Amz-Date=20261123T170618Z&X-Amz-Expires=900&X-Amz-SignedHeaders=content-type%3Bhost&x-id=PutObject&X-Amz-Signature=<redacted>
+PUT 6 MiB payload to base uploadUrl -> HTTP 200 (ACCEPTED WITHOUT SIZE LIMIT!)
+POST /api/v1/memes/a6b8d377-731c-4ae1-a85e-3a7e3874626f/result-upload -> HTTP 200
+Result presigned URL: http://localhost:3900/meme-portal/result/a6b8d377-731c-4ae1-a85e-3a7e3874626f.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=GK4f8e1c2a9b3d7e6051c2f3a4b5c6d7e8%2F20261123%2Fgarage%2Fs3%2Faws4_request&X-Amz-Date=20261123T170618Z&X-Amz-Expires=900&X-Amz-SignedHeaders=content-type%3Bhost&x-id=PutObject&X-Amz-Signature=<redacted>
+PUT 6 MiB payload to result uploadUrl -> HTTP 200 (ACCEPTED WITHOUT SIZE LIMIT!)
+
+--- 5. Cleanup Test Memes ---
+DELETE /api/v1/memes/e7aae424-393f-424c-8005-730fd258518b -> HTTP 200
+DELETE /api/v1/memes/0930d0b1-7c4a-498b-b5c4-d158d7891056 -> HTTP 200
+DELETE /api/v1/memes/be7e8971-1e1d-44ab-bd3e-6995183837c5 -> HTTP 200
+DELETE /api/v1/memes/a6b8d377-731c-4ae1-a85e-3a7e3874626f -> HTTP 200

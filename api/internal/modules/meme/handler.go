@@ -23,7 +23,8 @@ func NewHandler(service *Service) *Handler {
 type prepareUploadDTO struct {
 	Title       string `json:"title"`
 	Filename    string `json:"filename"`
-	ContentType string `json:"contentType"` // dikirim klien, dipakai mentah di presign
+	ContentType string `json:"contentType"`
+	FileSize    int64  `json:"fileSize"`
 }
 
 // PrepareUpload: user minta URL upload untuk gambar dasarnya.
@@ -39,12 +40,16 @@ func (h *Handler) PrepareUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ext := path.Ext(dto.Filename)
-	res, err := h.service.PrepareUpload(r.Context(), userID, dto.Title, ext, dto.ContentType)
+	res, err := h.service.PrepareUpload(r.Context(), userID, dto.Title, ext, dto.ContentType, dto.FileSize)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
 	response.Success(w, http.StatusCreated, CodeUploadPrepared, res, "upload disiapkan")
+}
+
+type resultUploadDTO struct {
+	FileSize int64 `json:"fileSize"`
 }
 
 type completeDTO struct {
@@ -58,7 +63,12 @@ func (h *Handler) ResultUpload(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusUnauthorized, response.CodeUnauthorized, "unauthorized")
 		return
 	}
-	res, err := h.service.ResultUpload(r.Context(), userID, r.PathValue("id"))
+	var dto resultUploadDTO
+	if err := json.NewDecoder(r.Body).Decode(&dto); err != nil {
+		response.Error(w, http.StatusBadRequest, response.CodeInvalidRequestBody, "invalid request body")
+		return
+	}
+	res, err := h.service.ResultUpload(r.Context(), userID, r.PathValue("id"), dto.FileSize)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -120,6 +130,8 @@ func writeError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, ErrInvalidFile):
 		response.Error(w, http.StatusBadRequest, response.CodeInvalidImage, err.Error())
+	case errors.Is(err, ErrFileTooLarge):
+		response.Error(w, http.StatusRequestEntityTooLarge, response.CodeUploadTooLarge, err.Error())
 	case errors.Is(err, ErrNotFound):
 		response.Error(w, http.StatusNotFound, response.CodeMemeNotFound, err.Error())
 	case errors.Is(err, ErrNotSubscribedGate):
