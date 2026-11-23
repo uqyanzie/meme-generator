@@ -31,6 +31,7 @@ func newStubS3Client(t *testing.T, serverURL string) *s3.Client {
 	return s3.NewFromConfig(cfg, func(o *s3.Options) {
 		o.BaseEndpoint = aws.String(serverURL)
 		o.UsePathStyle = true
+		o.RetryMaxAttempts = 1
 	})
 }
 
@@ -140,56 +141,61 @@ func TestService_PrepareUpload_Validation(t *testing.T) {
 	}, stubGate{})
 
 	const maxBytes int64 = 5 << 20
+	sizePtr := func(v int64) *int64 { return &v }
 
 	invalidCases := []struct {
 		name        string
 		ext         string
 		contentType string
-		fileSize    int64
+		fileSize    *int64
 		wantErr     error
 	}{
-		{"html ext", ".html", "text/html", 64, meme.ErrInvalidFile},
-		{"exe ext", ".exe", "application/octet-stream", 1024, meme.ErrInvalidFile},
-		{"zip ext", ".zip", "application/zip", 1024, meme.ErrInvalidFile},
-		{"svg ext", ".svg", "image/svg+xml", 512, meme.ErrInvalidFile},
-		{"empty ext", "", "image/png", 512, meme.ErrInvalidFile},
-		{"png ext with text/html", ".png", "text/html", 512, meme.ErrInvalidFile},
-		{"jpg ext with image/png", ".jpg", "image/png", 512, meme.ErrInvalidFile},
-		{"empty contentType", ".png", "", 512, meme.ErrInvalidFile},
-		{"zero fileSize", ".png", "image/png", 0, meme.ErrInvalidFile},
-		{"negative fileSize", ".png", "image/png", -1, meme.ErrInvalidFile},
-		{"oversized fileSize", ".png", "image/png", maxBytes + 1, meme.ErrFileTooLarge},
+		{"html ext", ".html", "text/html", sizePtr(64), meme.ErrInvalidFile},
+		{"html ext omitted size and mime", ".html", "", nil, meme.ErrInvalidFile},
+		{"exe ext", ".exe", "application/octet-stream", sizePtr(1024), meme.ErrInvalidFile},
+		{"zip ext", ".zip", "application/zip", sizePtr(1024), meme.ErrInvalidFile},
+		{"svg ext", ".svg", "image/svg+xml", sizePtr(512), meme.ErrInvalidFile},
+		{"empty ext", "", "image/png", sizePtr(512), meme.ErrInvalidFile},
+		{"png ext with text/html", ".png", "text/html", sizePtr(512), meme.ErrInvalidFile},
+		{"png ext with text/html omitted size", ".png", "text/html", nil, meme.ErrInvalidFile},
+		{"jpg ext with image/png", ".jpg", "image/png", sizePtr(512), meme.ErrInvalidFile},
+		{"explicit zero fileSize", ".png", "image/png", sizePtr(0), meme.ErrInvalidFile},
+		{"negative fileSize", ".png", "image/png", sizePtr(-1), meme.ErrInvalidFile},
+		{"oversized fileSize", ".png", "image/png", sizePtr(maxBytes + 1), meme.ErrFileTooLarge},
 	}
 
 	for _, tc := range invalidCases {
 		t.Run("reject/"+tc.name, func(t *testing.T) {
 			_, err := svc.PrepareUpload(ctx, userID, tc.name, tc.ext, tc.contentType, tc.fileSize)
 			if !errors.Is(err, tc.wantErr) {
-				t.Fatalf("PrepareUpload(%q, %q, %d) err = %v, want %v", tc.ext, tc.contentType, tc.fileSize, err, tc.wantErr)
+				t.Fatalf("PrepareUpload(%q, %q, %v) err = %v, want %v", tc.ext, tc.contentType, tc.fileSize, err, tc.wantErr)
 			}
 		})
 	}
 
 	validCases := []struct {
-		name        string
-		ext         string
-		contentType string
-		fileSize    int64
+		name            string
+		ext             string
+		contentType     string
+		fileSize        *int64
+		wantSignedHdrs  []string
 	}{
-		{"jpg", ".jpg", "image/jpeg", 1024},
-		{"uppercase JPEG + MIME", ".JPEG", "IMAGE/JPEG", maxBytes},
-		{"png with params", ".png", "image/png; charset=binary", maxBytes},
-		{"gif", ".gif", "image/gif", 2048},
-		{"webp", ".webp", "image/webp", 4096},
+		{"jpg", ".jpg", "image/jpeg", sizePtr(1024), []string{"content-length", "content-type"}},
+		{"uppercase JPEG + MIME", ".JPEG", "IMAGE/JPEG", sizePtr(maxBytes), []string{"content-length", "content-type"}},
+		{"png with params", ".png", "image/png; charset=binary", sizePtr(maxBytes), []string{"content-length", "content-type"}},
+		{"gif", ".gif", "image/gif", sizePtr(2048), []string{"content-length", "content-type"}},
+		{"webp", ".webp", "image/webp", sizePtr(4096), []string{"content-length", "content-type"}},
+		{"omitted fileSize", ".png", "image/png", nil, []string{"content-type"}},
+		{"omitted contentType and fileSize", ".png", "", nil, []string{"content-type"}},
 	}
 
 	for _, tc := range validCases {
 		t.Run("accept/"+tc.name, func(t *testing.T) {
 			res, err := svc.PrepareUpload(ctx, userID, tc.name, tc.ext, tc.contentType, tc.fileSize)
 			if err != nil {
-				t.Fatalf("PrepareUpload(%q, %q, %d) unexpected err: %v", tc.ext, tc.contentType, tc.fileSize, err)
+				t.Fatalf("PrepareUpload(%q, %q, %v) unexpected err: %v", tc.ext, tc.contentType, tc.fileSize, err)
 			}
-			assertSignedHeaders(t, res.UploadURL, "content-length", "content-type")
+			assertSignedHeaders(t, res.UploadURL, tc.wantSignedHdrs...)
 		})
 	}
 }
@@ -206,6 +212,7 @@ func TestService_ResultUpload_Validation(t *testing.T) {
 	}, stubGate{})
 
 	const maxBytes int64 = 5 << 20
+	sizePtr := func(v int64) *int64 { return &v }
 
 	m, err := repo.Create(ctx, meme.Meme{
 		UserID:       userID,
@@ -216,17 +223,23 @@ func TestService_ResultUpload_Validation(t *testing.T) {
 		t.Fatalf("create meme: %v", err)
 	}
 
-	if _, err := svc.ResultUpload(ctx, userID, m.ID, 0); !errors.Is(err, meme.ErrInvalidFile) {
+	if _, err := svc.ResultUpload(ctx, userID, m.ID, sizePtr(0)); !errors.Is(err, meme.ErrInvalidFile) {
 		t.Fatalf("expected ErrInvalidFile for size 0, got %v", err)
 	}
-	if _, err := svc.ResultUpload(ctx, userID, m.ID, -5); !errors.Is(err, meme.ErrInvalidFile) {
+	if _, err := svc.ResultUpload(ctx, userID, m.ID, sizePtr(-5)); !errors.Is(err, meme.ErrInvalidFile) {
 		t.Fatalf("expected ErrInvalidFile for size -5, got %v", err)
 	}
-	if _, err := svc.ResultUpload(ctx, userID, m.ID, maxBytes+1); !errors.Is(err, meme.ErrFileTooLarge) {
+	if _, err := svc.ResultUpload(ctx, userID, m.ID, sizePtr(maxBytes+1)); !errors.Is(err, meme.ErrFileTooLarge) {
 		t.Fatalf("expected ErrFileTooLarge for size maxBytes+1, got %v", err)
 	}
 
-	res, err := svc.ResultUpload(ctx, userID, m.ID, maxBytes)
+	resCompat, err := svc.ResultUpload(ctx, userID, m.ID, nil)
+	if err != nil {
+		t.Fatalf("ResultUpload with nil size failed: %v", err)
+	}
+	assertSignedHeaders(t, resCompat.UploadURL, "content-type")
+
+	res, err := svc.ResultUpload(ctx, userID, m.ID, sizePtr(maxBytes))
 	if err != nil {
 		t.Fatalf("ResultUpload at boundary failed: %v", err)
 	}

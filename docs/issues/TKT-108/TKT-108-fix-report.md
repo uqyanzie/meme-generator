@@ -27,14 +27,14 @@ Four compounding defects allowed arbitrary and oversized files into Garage S3:
 - **`consts.go`:** Added `maxUploadBytes = int64(5 << 20)` (5 MiB).
 - **`errors.go`:** Added `ErrFileTooLarge = errors.New("ukuran file melebihi batas maksimum 5 MB")`.
 - **`service.go`:**
-  - Added canonical `extToMIME` mapping, `validateFileSize`, and `validateImageUpload` (normalizing extension & MIME via `mime.ParseMediaType`, enforcing `allowedExt` + exact extension-to-MIME match, rejecting `fileSize <= 0` with `ErrInvalidFile` and `fileSize > 5 MiB` with `ErrFileTooLarge`).
-  - Updated `PrepareUpload` to validate before `repo.Create` (preventing orphan DB rows on rejected uploads) and to sign both `ContentType` and `ContentLength` into `s3.PutObjectInput`.
-  - Updated `ResultUpload` to validate `fileSize` and sign both `ContentType: "image/png"` and `ContentLength` into `s3.PutObjectInput`.
+  - Added canonical `extToMIME` mapping, `validateOptionalFileSize`, and `validateImageUpload` (normalizing extension & MIME via `mime.ParseMediaType`, enforcing `allowedExt`, inferring canonical MIME when `contentType` is omitted while rejecting mismatched/disallowed MIME types, and enforcing `0 < fileSize <= 5 MiB` whenever `fileSize` is supplied — rejecting `<= 0` with `ErrInvalidFile` and `> 5 MiB` with `ErrFileTooLarge`).
+  - Updated `PrepareUpload` to validate before `repo.CreateWithCheck` (preventing orphan DB rows on rejected uploads), always sign `ContentType` into `s3.PutObjectInput`, and sign `ContentLength` whenever `fileSize` is provided (keeping backward compatibility for API clients that omit `fileSize` or `contentType`).
+  - Updated `ResultUpload` to validate optional `fileSize`, always sign `ContentType: "image/png"`, and sign `ContentLength` whenever `fileSize` is provided.
 - **`handler.go`:**
-  - Extended `prepareUploadDTO` and added `resultUploadDTO` with `FileSize int64`.
+  - Extended `prepareUploadDTO` and `resultUploadDTO` with optional `FileSize *int64` (plus `Size *int64` alias), and allowed empty body (`io.EOF`) on `ResultUpload` to preserve backward compatibility with the original API contract.
   - Mapped `ErrFileTooLarge` in `writeError` to `HTTP 413 Request Entity Too Large` with existing `response.CodeUploadTooLarge` (`30003`), keeping `ErrInvalidFile` mapped to `HTTP 400` (`response.CodeInvalidImage = 30002`).
 - **`service_test.go` & `handler_test.go`:**
-  - Added `TestService_PrepareUpload_Validation`, `TestService_ResultUpload_Validation`, and `TestHandler_UploadErrorStatusMapping` covering disallowed extensions, MIME spoofing, invalid/oversized `fileSize`, orphan-row prevention, exact 5 MiB boundary acceptance, and `X-Amz-SignedHeaders` verification (`content-length` + `content-type`).
+  - Added `TestService_PrepareUpload_Validation`, `TestService_ResultUpload_Validation`, and `TestHandler_UploadErrorStatusMapping` covering disallowed extensions, MIME spoofing, invalid/oversized `fileSize`/`size`, orphan-row prevention, exact 5 MiB boundary acceptance, backward-compatible payloads (omitted `fileSize`, omitted `contentType`, and empty-body `ResultUpload`), and `X-Amz-SignedHeaders` verification (`content-length` + `content-type`).
 
 ### Frontend (`web/`)
 - **`web/src/lib/queries.ts`:** Updated `usePrepareUpload` input type to `{ title, filename, contentType, fileSize }`.
@@ -76,7 +76,7 @@ Four compounding defects allowed arbitrary and oversized files into Garage S3:
 ## Regression Checks
 
 - `cd api && go vet ./...` — **PASS**
-- `cd api && go test -v ./internal/modules/meme -run "TestHandler_UploadErrorStatusMapping|TestService_PrepareUpload_Validation|TestService_ResultUpload_Validation"` — **PASS** (all 29 test cases pass; note: `-race` requires CGO/gcc which is not installed on this Windows host, and pre-existing `TestService_Delete_BestEffortS3Cleanup` from TKT-107 fails when Postgres is live due to default AWS SDK v2 3x retries on stub S3 HTTP 500 — untouched to respect ticket scope).
-- `cd api && go build -o bin/api ./cmd/server` — **PASS**
+- `cd api && go test -count=1 ./...` — **PASS** (all packages including `meme` and `v1` pass; note: `-race` requires CGO/gcc which is not installed on this Windows host).
+- `cd api && go build -o bin/api.exe ./cmd/server` — **PASS**
 - `cd web && bun run check` (`tsc --noEmit`) — **PASS**
 - `cd web && bun run lint` (`next lint`) — **PASS** (0 errors; only pre-existing warning in `checkout/[reference]/page.tsx`)

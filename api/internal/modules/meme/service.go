@@ -37,7 +37,7 @@ func NewService(repo *Repository, s3Client *s3.Client, cfg config.StorageConfig,
 
 // PrepareUpload membuat record meme (pending) dan mengembalikan presigned PUT URL
 // untuk mengunggah gambar dasar langsung ke S3/Garage.
-func (s *Service) PrepareUpload(ctx context.Context, userID, title, ext, contentType string, fileSize int64) (UploadResponse, error) {
+func (s *Service) PrepareUpload(ctx context.Context, userID, title, ext, contentType string, fileSize *int64) (UploadResponse, error) {
 	normExt, normMIME, err := validateImageUpload(ext, contentType, fileSize)
 	if err != nil {
 		return UploadResponse{}, err
@@ -56,10 +56,12 @@ func (s *Service) PrepareUpload(ctx context.Context, userID, title, ext, content
 
 	presign := s3.NewPresignClient(s.s3)
 	input := &s3.PutObjectInput{
-		Bucket:        &s.bucket,
-		Key:           &objectKey,
-		ContentType:   aws.String(normMIME),
-		ContentLength: aws.Int64(fileSize),
+		Bucket:      &s.bucket,
+		Key:         &objectKey,
+		ContentType: aws.String(normMIME),
+	}
+	if fileSize != nil {
+		input.ContentLength = aws.Int64(*fileSize)
 	}
 	req, err := presign.PresignPutObject(ctx, input, s3.WithPresignExpires(maxPresignTTL))
 	if err != nil {
@@ -70,11 +72,11 @@ func (s *Service) PrepareUpload(ctx context.Context, userID, title, ext, content
 
 // ResultUpload mengembalikan presigned PUT URL untuk gambar hasil render
 // (canvas) milik meme <id>; complete kemudian menyimpan URL publiknya.
-func (s *Service) ResultUpload(ctx context.Context, userID, id string, fileSize int64) (UploadResponse, error) {
+func (s *Service) ResultUpload(ctx context.Context, userID, id string, fileSize *int64) (UploadResponse, error) {
 	if err := s.gate.HasActiveSubscription(ctx, userID); err != nil {
 		return UploadResponse{}, err
 	}
-	if err := validateFileSize(fileSize); err != nil {
+	if err := validateOptionalFileSize(fileSize); err != nil {
 		return UploadResponse{}, err
 	}
 	if _, err := s.repo.GetByID(ctx, id, userID); err != nil {
@@ -83,12 +85,15 @@ func (s *Service) ResultUpload(ctx context.Context, userID, id string, fileSize 
 	objectKey := fmt.Sprintf("result/%s.png", id)
 
 	presign := s3.NewPresignClient(s.s3)
-	req, err := presign.PresignPutObject(ctx, &s3.PutObjectInput{
-		Bucket:        &s.bucket,
-		Key:           &objectKey,
-		ContentType:   aws.String("image/png"),
-		ContentLength: aws.Int64(fileSize),
-	}, s3.WithPresignExpires(maxPresignTTL))
+	input := &s3.PutObjectInput{
+		Bucket:      &s.bucket,
+		Key:         &objectKey,
+		ContentType: aws.String("image/png"),
+	}
+	if fileSize != nil {
+		input.ContentLength = aws.Int64(*fileSize)
+	}
+	req, err := presign.PresignPutObject(ctx, input, s3.WithPresignExpires(maxPresignTTL))
 	if err != nil {
 		return UploadResponse{}, fmt.Errorf("meme service: presign gagal: %w", err)
 	}
@@ -179,17 +184,20 @@ var extToMIME = map[string]string{
 	".webp": "image/webp",
 }
 
-func validateFileSize(fileSize int64) error {
-	if fileSize <= 0 {
+func validateOptionalFileSize(fileSize *int64) error {
+	if fileSize == nil {
+		return nil
+	}
+	if *fileSize <= 0 {
 		return ErrInvalidFile
 	}
-	if fileSize > maxUploadBytes {
+	if *fileSize > maxUploadBytes {
 		return ErrFileTooLarge
 	}
 	return nil
 }
 
-func validateImageUpload(ext, contentType string, fileSize int64) (normExt, normMIME string, err error) {
+func validateImageUpload(ext, contentType string, fileSize *int64) (normExt, normMIME string, err error) {
 	normExt = strings.ToLower(strings.TrimSpace(ext))
 	if !allowedExt(normExt) {
 		return "", "", ErrInvalidFile
@@ -198,11 +206,13 @@ func validateImageUpload(ext, contentType string, fileSize int64) (normExt, norm
 	if !ok {
 		return "", "", ErrInvalidFile
 	}
-	mediaType, _, parseErr := mime.ParseMediaType(contentType)
-	if parseErr != nil || strings.ToLower(strings.TrimSpace(mediaType)) != expectedMIME {
-		return "", "", ErrInvalidFile
+	if strings.TrimSpace(contentType) != "" {
+		mediaType, _, parseErr := mime.ParseMediaType(contentType)
+		if parseErr != nil || strings.ToLower(strings.TrimSpace(mediaType)) != expectedMIME {
+			return "", "", ErrInvalidFile
+		}
 	}
-	if err := validateFileSize(fileSize); err != nil {
+	if err := validateOptionalFileSize(fileSize); err != nil {
 		return "", "", err
 	}
 	return normExt, expectedMIME, nil

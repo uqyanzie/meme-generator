@@ -130,8 +130,8 @@ func TestHandler_UploadErrorStatusMapping(t *testing.T) {
 			wantCode:   response.CodeInvalidImage,
 		},
 		{
-			name:       "missing fileSize (0)",
-			payload:    map[string]any{"title": "zero", "filename": "ok.png", "contentType": "image/png"},
+			name:       "explicit zero fileSize",
+			payload:    map[string]any{"title": "zero", "filename": "ok.png", "contentType": "image/png", "fileSize": 0},
 			wantStatus: http.StatusBadRequest,
 			wantCode:   response.CodeInvalidImage,
 		},
@@ -144,6 +144,12 @@ func TestHandler_UploadErrorStatusMapping(t *testing.T) {
 		{
 			name:       "oversized fileSize (5 MiB + 1)",
 			payload:    map[string]any{"title": "huge", "filename": "huge.png", "contentType": "image/png", "fileSize": testMaxUploadBytes + 1},
+			wantStatus: http.StatusRequestEntityTooLarge,
+			wantCode:   response.CodeUploadTooLarge,
+		},
+		{
+			name:       "oversized size alias (5 MiB + 1)",
+			payload:    map[string]any{"title": "huge-alias", "filename": "huge.png", "contentType": "image/png", "size": testMaxUploadBytes + 1},
 			wantStatus: http.StatusRequestEntityTooLarge,
 			wantCode:   response.CodeUploadTooLarge,
 		},
@@ -186,7 +192,51 @@ func TestHandler_UploadErrorStatusMapping(t *testing.T) {
 	}
 	assertSignedHeaders(t, prepared.UploadURL, "content-length", "content-type")
 
-	// 3. ResultUpload error status mapping & valid presign.
+	// 2b. Backward-compatible PrepareUpload (omitting fileSize, and omitting both contentType & fileSize).
+	t.Run("PrepareUpload/omit fileSize", func(t *testing.T) {
+		rec, env := doJSON(http.MethodPost, "/api/v1/memes/upload", map[string]any{
+			"title":       "compat-api",
+			"filename":    "ok.png",
+			"contentType": "image/png",
+		})
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("status = %d, want %d (body: %s)", rec.Code, http.StatusCreated, rec.Body.String())
+		}
+		var res meme.UploadResponse
+		if err := json.Unmarshal(env.Data, &res); err != nil {
+			t.Fatalf("decode data: %v", err)
+		}
+		assertSignedHeaders(t, res.UploadURL, "content-type")
+	})
+
+	t.Run("PrepareUpload/omit contentType and fileSize", func(t *testing.T) {
+		rec, env := doJSON(http.MethodPost, "/api/v1/memes/upload", map[string]any{
+			"title":    "compat-web",
+			"filename": "ok.jpg",
+		})
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("status = %d, want %d (body: %s)", rec.Code, http.StatusCreated, rec.Body.String())
+		}
+		var res meme.UploadResponse
+		if err := json.Unmarshal(env.Data, &res); err != nil {
+			t.Fatalf("decode data: %v", err)
+		}
+		assertSignedHeaders(t, res.UploadURL, "content-type")
+	})
+
+	// 3. ResultUpload error status mapping, backward-compatible empty body & valid presign.
+	t.Run("ResultUpload/empty body backward-compatible", func(t *testing.T) {
+		rec, env := doJSON(http.MethodPost, "/api/v1/memes/"+prepared.ID+"/result-upload", nil)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d (body: %s)", rec.Code, http.StatusOK, rec.Body.String())
+		}
+		var res meme.UploadResponse
+		if err := json.Unmarshal(env.Data, &res); err != nil {
+			t.Fatalf("decode result data: %v", err)
+		}
+		assertSignedHeaders(t, res.UploadURL, "content-type")
+	})
+
 	t.Run("ResultUpload/invalid json", func(t *testing.T) {
 		rec, env := doJSON(http.MethodPost, "/api/v1/memes/"+prepared.ID+"/result-upload", "{bad-json")
 		if rec.Code != http.StatusBadRequest {

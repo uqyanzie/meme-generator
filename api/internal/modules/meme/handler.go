@@ -3,6 +3,7 @@ package meme
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"path"
@@ -24,7 +25,15 @@ type prepareUploadDTO struct {
 	Title       string `json:"title"`
 	Filename    string `json:"filename"`
 	ContentType string `json:"contentType"`
-	FileSize    int64  `json:"fileSize"`
+	FileSize    *int64 `json:"fileSize"`
+	Size        *int64 `json:"size"`
+}
+
+func resolveFileSize(fileSize, size *int64) *int64 {
+	if fileSize != nil {
+		return fileSize
+	}
+	return size
 }
 
 // PrepareUpload: user minta URL upload untuk gambar dasarnya.
@@ -40,7 +49,8 @@ func (h *Handler) PrepareUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ext := path.Ext(dto.Filename)
-	res, err := h.service.PrepareUpload(r.Context(), userID, dto.Title, ext, dto.ContentType, dto.FileSize)
+	fileSize := resolveFileSize(dto.FileSize, dto.Size)
+	res, err := h.service.PrepareUpload(r.Context(), userID, dto.Title, ext, dto.ContentType, fileSize)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -49,7 +59,8 @@ func (h *Handler) PrepareUpload(w http.ResponseWriter, r *http.Request) {
 }
 
 type resultUploadDTO struct {
-	FileSize int64 `json:"fileSize"`
+	FileSize *int64 `json:"fileSize"`
+	Size     *int64 `json:"size"`
 }
 
 type completeDTO struct {
@@ -64,11 +75,14 @@ func (h *Handler) ResultUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var dto resultUploadDTO
-	if err := json.NewDecoder(r.Body).Decode(&dto); err != nil {
-		response.Error(w, http.StatusBadRequest, response.CodeInvalidRequestBody, "invalid request body")
-		return
+	if r.Body != nil {
+		if err := json.NewDecoder(r.Body).Decode(&dto); err != nil && !errors.Is(err, io.EOF) {
+			response.Error(w, http.StatusBadRequest, response.CodeInvalidRequestBody, "invalid request body")
+			return
+		}
 	}
-	res, err := h.service.ResultUpload(r.Context(), userID, r.PathValue("id"), dto.FileSize)
+	fileSize := resolveFileSize(dto.FileSize, dto.Size)
+	res, err := h.service.ResultUpload(r.Context(), userID, r.PathValue("id"), fileSize)
 	if err != nil {
 		writeError(w, err)
 		return
