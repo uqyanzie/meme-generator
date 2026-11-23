@@ -58,3 +58,13 @@ Clicking **Keluar (Logout)** previously failed to delete auth cookies (wrong `Pa
 ### Solution
 - **Backend:** Added `AND s.ends_at > now()` to `Repository.ActiveByUser` in `api/internal/modules/subscription/repository.go`.
 - **Verification:** Added Go regression tests (`api/internal/modules/subscription/repository_test.go`, `api/internal/server/v1/v1_test.go`), passed `go vet`, `go test`, `go build`, `bun run check`, `bun run lint`, and verified live Before vs. After API behavior (`docs/issues/TKT-101/evidence/after-api-repro.txt`).
+
+---
+
+## TKT-105: Duplicate Checkout / Double Billing Creation
+
+- **Status:** Resolved
+- **Detailed Report:** [docs/issues/TKT-105/TKT-105-fix-report.md](./docs/issues/TKT-105/TKT-105-fix-report.md)
+- **Root Cause:** `useCheckout()` generated a fresh `Idempotency-Key` per click, the Pricing UI did not disable in-flight submissions, `Service.Checkout` had a non-atomic idempotency check (causing `500` on concurrent identical keys) and no `(user_id, plan_id)` pending deduplication, and CORS preflight omitted `Idempotency-Key`.
+- **Solution:** Added per-plan `Idempotency-Key` reuse and `isBusy` button/navigation guards in `web/src/app/pricing/page.tsx` & `web/src/lib/queries.ts`; added `Idempotency-Key` to `Access-Control-Allow-Headers` in `api/internal/middleware/cors.go`; added partial unique index `subscriptions_user_plan_pending_idx` (`000006`), `PendingCheckoutByUserAndPlan`, and `SQLSTATE 23505` replay recovery in `api/internal/modules/subscription/`.
+- **Verification:** Added Go regression tests (`api/internal/middleware/cors_test.go`, `api/internal/modules/subscription/repository_test.go`), passed `go vet`, `go test -p 1`, `go build`, `bun run check`, `bun run lint`, and verified live Before vs. After API & browser behavior (`docs/issues/TKT-105/evidence/after-api-repro.txt`, `docs/issues/TKT-105/evidence/after-browser-repro.txt`).

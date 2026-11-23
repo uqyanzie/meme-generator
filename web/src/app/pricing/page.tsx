@@ -3,6 +3,7 @@
 // Pricing: daftar paket dari backend; checkout lewat payment gateway mock.
 // NOTE (scaffold): belum ada redirect/confirm UI.
 
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useCheckout, usePlans, useSubscriptionStatus } from "@/lib/queries";
 import { describeError } from "@/lib/errors";
@@ -22,6 +23,31 @@ export default function PricingPage() {
   const status = useSubscriptionStatus();
   const checkout = useCheckout();
   const router = useRouter();
+  const idempotencyKeysRef = useRef<Record<string, string>>({});
+  const [submittingPlan, setSubmittingPlan] = useState<string | null>(null);
+  const [isNavigating, setIsNavigating] = useState(false);
+
+  const isBusy = checkout.isPending || isNavigating;
+
+  const handleCheckout = (planCode: string) => {
+    if (isBusy) return;
+    if (!idempotencyKeysRef.current[planCode]) {
+      idempotencyKeysRef.current[planCode] = crypto.randomUUID();
+    }
+    setSubmittingPlan(planCode);
+    checkout.mutate(
+      { planCode, idempotencyKey: idempotencyKeysRef.current[planCode] },
+      {
+        onSuccess: (res) => {
+          setIsNavigating(true);
+          router.push(`/checkout/${res.payment.reference}`);
+        },
+        onError: () => {
+          setSubmittingPlan(null);
+        },
+      },
+    );
+  };
 
   return (
     <main className="mx-auto max-w-4xl space-y-8 p-8">
@@ -63,14 +89,12 @@ export default function PricingPage() {
               </p>
               <Button
                 className="w-full"
-                onClick={() =>
-                  checkout.mutate(plan.code, {
-                    onSuccess: (res) =>
-                      router.push(`/checkout/${res.payment.reference}`),
-                  })
-                }
+                disabled={isBusy}
+                onClick={() => handleCheckout(plan.code)}
               >
-                Berlangganan
+                {isBusy && submittingPlan === plan.code
+                  ? "Memproses..."
+                  : "Berlangganan"}
               </Button>
             </CardContent>
           </Card>

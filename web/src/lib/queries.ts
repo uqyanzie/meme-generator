@@ -57,15 +57,17 @@ export function invalidateMemeQueries(qc: QueryClient) {
 export function useCheckout() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (planCode: string) =>
+    mutationFn: async ({
+      planCode,
+      idempotencyKey,
+    }: {
+      planCode: string;
+      idempotencyKey: string;
+    }) =>
       unwrap<CheckoutResponse>(
         await api.post("/api/v1/subscription/checkout", { planCode }, {
           headers: {
-            // BUG: key dibuat BARU di setiap panggilan mutationFn — artinya
-            // setiap klik (termasuk double-click) dianggap maksud berbeda.
-            // Key yang benar dibuat sekali per maksud (mis. per plan yang
-            // dipilih) lalu dipakai ulang saat retry.
-            "Idempotency-Key": crypto.randomUUID(),
+            "Idempotency-Key": idempotencyKey,
           },
         }),
       ),

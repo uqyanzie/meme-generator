@@ -1,0 +1,59 @@
+TKT-105 Before Reproduction Evidence — Backend API & Postgres
+Captured: 2026-11-23 (against unmodified HEAD)
+Stack: Go API (http://localhost:8080) + Postgres 17
+
+====================================================================
+Scenario A: Two sequential POST /api/v1/subscription/checkout calls
+for the same (user, planCode="premium_1d") with different
+Idempotency-Key headers (simulates current frontend double-click
+and cross-refresh behavior).
+====================================================================
+
+=== Scenario A: Different Idempotency-Keys (same user + plan) ===
+Request 1: subId=feffc24d-30e7-4a8e-9002-c329f5573ec7 ref=4cbee115c6eeae92e92006c5 key=c086a4c9-5c59-4658-8d87-11cd5d437285
+Request 2: subId=3ba26d5a-23ba-4726-841a-4678d431fbbd ref=88d0a7bd2ba27f2b6338722f key=63e244ad-e094-45d4-8873-42c572744619
+
+=== Postgres state for Scenario A ===
+                sub_id                | sub_status |        reference         | pay_status |           idempotency_key            
+--------------------------------------+------------+--------------------------+------------+--------------------------------------
+ feffc24d-30e7-4a8e-9002-c329f5573ec7 | pending    | 4cbee115c6eeae92e92006c5 | pending    | c086a4c9-5c59-4658-8d87-11cd5d437285
+ 3ba26d5a-23ba-4726-841a-4678d431fbbd | pending    | 88d0a7bd2ba27f2b6338722f | pending    | 63e244ad-e094-45d4-8873-42c572744619
+(2 rows)
+
+Observed Defect A:
+- Both requests returned HTTP 201 Created with two distinct subscription IDs
+  and two distinct payment references, leaving 2 pending checkouts for the
+  identical (user_id, plan_id).
+
+====================================================================
+Scenario B: 10 synchronized concurrent POST /api/v1/subscription/checkout
+calls for the same user with the IDENTICAL Idempotency-Key
+(d45153bf-3c9a-48c7-8a29-a7d0f80286e1).
+====================================================================
+
+=== Scenario B: 10 Synchronized Concurrent Requests with SAME Idempotency-Key (d45153bf-3c9a-48c7-8a29-a7d0f80286e1) ===
+Worker 1 -> HTTP 201: {"success":true,"code":20102,"message":"checkout dibuat","data":{"subscription":{"id":"63ad4257-71f1-414e-839b-02bbe5cf0f73","userId":"5c9be80c-d229-4835-9242-1b7a8506398a","planId":"e6ce09f5-21df-465c-a303-9582f1357a9b","status":"pending"},"payment":{"id":"92cdab22-47fd-4c41-9df0-b70108c6802b","subscriptionId":"63ad4257-71f1-414e-839b-02bbe5cf0f73","amountIdr":5000,"status":"pending","reference":"f7fd82f300761860762f78e7"},"mockGatewayUrl":"/api/v1/subscription/payments/f7fd82f300761860762f78e7/confirm"}}
+
+Worker 2 -> HTTP 500: {"success":false,"code":50000,"message":"internal server error"}
+
+Worker 3 -> HTTP 201: {"success":true,"code":20102,"message":"checkout dibuat","data":{"subscription":{"id":"63ad4257-71f1-414e-839b-02bbe5cf0f73","userId":"5c9be80c-d229-4835-9242-1b7a8506398a","planId":"e6ce09f5-21df-465c-a303-9582f1357a9b","status":"pending"},"payment":{"id":"92cdab22-47fd-4c41-9df0-b70108c6802b","subscriptionId":"63ad4257-71f1-414e-839b-02bbe5cf0f73","amountIdr":5000,"status":"pending","reference":"f7fd82f300761860762f78e7"},"mockGatewayUrl":"/api/v1/subscription/payments/f7fd82f300761860762f78e7/confirm"}}
+
+Worker 4 -> HTTP 201: {"success":true,"code":20102,"message":"checkout dibuat","data":{"subscription":{"id":"63ad4257-71f1-414e-839b-02bbe5cf0f73","userId":"5c9be80c-d229-4835-9242-1b7a8506398a","planId":"e6ce09f5-21df-465c-a303-9582f1357a9b","status":"pending"},"payment":{"id":"92cdab22-47fd-4c41-9df0-b70108c6802b","subscriptionId":"63ad4257-71f1-414e-839b-02bbe5cf0f73","amountIdr":5000,"status":"pending","reference":"f7fd82f300761860762f78e7"},"mockGatewayUrl":"/api/v1/subscription/payments/f7fd82f300761860762f78e7/confirm"}}
+
+Worker 5 -> HTTP 500: {"success":false,"code":50000,"message":"internal server error"}
+
+Worker 6 -> HTTP 201: {"success":true,"code":20102,"message":"checkout dibuat","data":{"subscription":{"id":"63ad4257-71f1-414e-839b-02bbe5cf0f73","userId":"5c9be80c-d229-4835-9242-1b7a8506398a","planId":"e6ce09f5-21df-465c-a303-9582f1357a9b","status":"pending"},"payment":{"id":"92cdab22-47fd-4c41-9df0-b70108c6802b","subscriptionId":"63ad4257-71f1-414e-839b-02bbe5cf0f73","amountIdr":5000,"status":"pending","reference":"f7fd82f300761860762f78e7"},"mockGatewayUrl":"/api/v1/subscription/payments/f7fd82f300761860762f78e7/confirm"}}
+
+Worker 7 -> HTTP 500: {"success":false,"code":50000,"message":"internal server error"}
+
+Worker 8 -> HTTP 201: {"success":true,"code":20102,"message":"checkout dibuat","data":{"subscription":{"id":"63ad4257-71f1-414e-839b-02bbe5cf0f73","userId":"5c9be80c-d229-4835-9242-1b7a8506398a","planId":"e6ce09f5-21df-465c-a303-9582f1357a9b","status":"pending"},"payment":{"id":"92cdab22-47fd-4c41-9df0-b70108c6802b","subscriptionId":"63ad4257-71f1-414e-839b-02bbe5cf0f73","amountIdr":5000,"status":"pending","reference":"f7fd82f300761860762f78e7"},"mockGatewayUrl":"/api/v1/subscription/payments/f7fd82f300761860762f78e7/confirm"}}
+
+Worker 9 -> HTTP 500: {"success":false,"code":50000,"message":"internal server error"}
+
+Worker 10 -> HTTP 201: {"success":true,"code":20102,"message":"checkout dibuat","data":{"subscription":{"id":"63ad4257-71f1-414e-839b-02bbe5cf0f73","userId":"5c9be80c-d229-4835-9242-1b7a8506398a","planId":"e6ce09f5-21df-465c-a303-9582f1357a9b","status":"pending"},"payment":{"id":"92cdab22-47fd-4c41-9df0-b70108c6802b","subscriptionId":"63ad4257-71f1-414e-839b-02bbe5cf0f73","amountIdr":5000,"status":"pending","reference":"f7fd82f300761860762f78e7"},"mockGatewayUrl":"/api/v1/subscription/payments/f7fd82f300761860762f78e7/confirm"}}
+
+Observed Defect B:
+- 4 of 10 concurrent requests with the identical Idempotency-Key failed with
+  HTTP 500 (code 50000: "internal server error") due to Time-of-Check to Time-of-Use race hitting
+  Postgres unique index payments_idempotency_key_idx instead of replaying
+  the winning checkout.

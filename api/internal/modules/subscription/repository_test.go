@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -126,5 +127,103 @@ func TestCheckout_AllowedAfterExpirationBeforeJanitor(t *testing.T) {
 	}
 	if res.Subscription.ID == "" {
 		t.Fatalf("expected non-empty subscription ID")
+	}
+}
+
+func TestCheckout_ReplaysSameIdempotencyKeyConcurrently(t *testing.T) {
+	pool := newTestPool(t)
+	userID := seedTestUser(t, pool)
+	repo := subscription.NewPostgresRepository(pool)
+	svc := subscription.NewService(repo, subscription.MockGateway{})
+
+	const n = 10
+	idempotencyKey := fmt.Sprintf("tkt105-same-%d", time.Now().UnixNano())
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	results := make([]subscription.CheckoutResponse, n)
+	errs := make([]error, n)
+
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			<-start
+			results[idx], errs[idx] = svc.Checkout(context.Background(), userID, subscription.CheckoutDTO{PlanCode: "premium_1d"}, idempotencyKey)
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	for i := 0; i < n; i++ {
+		if errs[i] != nil {
+			t.Fatalf("goroutine %d failed: %v", i, errs[i])
+		}
+		if results[i].Subscription.ID != results[0].Subscription.ID || results[i].Payment.Reference != results[0].Payment.Reference {
+			t.Fatalf("goroutine %d got (%s, %s), want (%s, %s)",
+				i, results[i].Subscription.ID, results[i].Payment.Reference,
+				results[0].Subscription.ID, results[0].Payment.Reference)
+		}
+	}
+
+	var subCount, payCount int
+	if err := pool.QueryRow(context.Background(), `SELECT COUNT(*) FROM subscriptions WHERE user_id = $1`, userID).Scan(&subCount); err != nil {
+		t.Fatalf("count subscriptions: %v", err)
+	}
+	if err := pool.QueryRow(context.Background(), `SELECT COUNT(*) FROM payments p JOIN subscriptions s ON s.id = p.subscription_id WHERE s.user_id = $1`, userID).Scan(&payCount); err != nil {
+		t.Fatalf("count payments: %v", err)
+	}
+	if subCount != 1 || payCount != 1 {
+		t.Fatalf("expected 1 subscription and 1 payment, got %d subscriptions and %d payments", subCount, payCount)
+	}
+}
+
+func TestCheckout_DeduplicatesPendingCheckoutAcrossNewIdempotencyKeys(t *testing.T) {
+	pool := newTestPool(t)
+	userID := seedTestUser(t, pool)
+	repo := subscription.NewPostgresRepository(pool)
+	svc := subscription.NewService(repo, subscription.MockGateway{})
+
+	res1, err := svc.Checkout(context.Background(), userID, subscription.CheckoutDTO{PlanCode: "premium_1d"}, fmt.Sprintf("tkt105-k1-%d", time.Now().UnixNano()))
+	if err != nil {
+		t.Fatalf("first checkout failed: %v", err)
+	}
+
+	res2, err := svc.Checkout(context.Background(), userID, subscription.CheckoutDTO{PlanCode: "premium_1d"}, fmt.Sprintf("tkt105-k2-%d", time.Now().UnixNano()))
+	if err != nil {
+		t.Fatalf("second checkout failed: %v", err)
+	}
+
+	if res2.Subscription.ID != res1.Subscription.ID || res2.Payment.Reference != res1.Payment.Reference {
+		t.Fatalf("expected replay of (%s, %s), got (%s, %s)",
+			res1.Subscription.ID, res1.Payment.Reference, res2.Subscription.ID, res2.Payment.Reference)
+	}
+
+	var subCount int
+	if err := pool.QueryRow(context.Background(), `SELECT COUNT(*) FROM subscriptions WHERE user_id = $1 AND status = 'pending'`, userID).Scan(&subCount); err != nil {
+		t.Fatalf("count pending subscriptions: %v", err)
+	}
+	if subCount != 1 {
+		t.Fatalf("expected 1 pending subscription, got %d", subCount)
+	}
+}
+
+func TestCheckout_AllowsDifferentPlanWhilePendingExists(t *testing.T) {
+	pool := newTestPool(t)
+	userID := seedTestUser(t, pool)
+	repo := subscription.NewPostgresRepository(pool)
+	svc := subscription.NewService(repo, subscription.MockGateway{})
+
+	res1, err := svc.Checkout(context.Background(), userID, subscription.CheckoutDTO{PlanCode: "premium_1d"}, fmt.Sprintf("tkt105-p1-%d", time.Now().UnixNano()))
+	if err != nil {
+		t.Fatalf("first plan checkout failed: %v", err)
+	}
+
+	res2, err := svc.Checkout(context.Background(), userID, subscription.CheckoutDTO{PlanCode: "premium_30d"}, fmt.Sprintf("tkt105-p2-%d", time.Now().UnixNano()))
+	if err != nil {
+		t.Fatalf("second plan checkout failed: %v", err)
+	}
+
+	if res1.Subscription.ID == res2.Subscription.ID || res1.Payment.Reference == res2.Payment.Reference {
+		t.Fatalf("expected distinct checkouts for different plans, got same (%s, %s)", res1.Subscription.ID, res1.Payment.Reference)
 	}
 }

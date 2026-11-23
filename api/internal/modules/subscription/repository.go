@@ -7,8 +7,14 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
 
 // Repository akses data langganan & pembayaran.
 type Repository struct {
@@ -92,19 +98,19 @@ func (r *Repository) CreateSubscription(ctx context.Context, userID string, p Pl
 	return sub, pay, nil
 }
 
-// CheckoutByIdempotencyKey mengembalikan checkout yang sudah ada untuk key
+// CheckoutByIdempotencyKey mengembalikan checkout yang sudah ada untuk user & key
 // yang sama (replay). ok=false berarti belum ada.
-func (r *Repository) CheckoutByIdempotencyKey(ctx context.Context, key string) (CheckoutResponse, bool, error) {
+func (r *Repository) CheckoutByIdempotencyKey(ctx context.Context, userID, key string) (CheckoutResponse, bool, error) {
 	const q = `
 		SELECT s.id, s.user_id, s.plan_id, s.status, s.starts_at, s.ends_at,
 		       p.id, p.subscription_id, p.amount_idr, p.status, p.reference
 		FROM payments p
 		JOIN subscriptions s ON s.id = p.subscription_id
-		WHERE p.idempotency_key = $1`
+		WHERE p.idempotency_key = $1 AND s.user_id = $2`
 	var (
 		res CheckoutResponse
 	)
-	err := r.pool.QueryRow(ctx, q, key).Scan(
+	err := r.pool.QueryRow(ctx, q, key, userID).Scan(
 		&res.Subscription.ID, &res.Subscription.UserID, &res.Subscription.PlanID,
 		&res.Subscription.Status, &res.Subscription.StartsAt, &res.Subscription.EndsAt,
 		&res.Payment.ID, &res.Payment.SubscriptionID, &res.Payment.AmountIDR,
@@ -115,6 +121,35 @@ func (r *Repository) CheckoutByIdempotencyKey(ctx context.Context, key string) (
 	}
 	if err != nil {
 		return CheckoutResponse{}, false, fmt.Errorf("subscription repository: lookup idempotency gagal: %w", err)
+	}
+	res.MockGatewayURL = "/api/v1/subscription/payments/" + res.Payment.Reference + "/confirm"
+	return res, true, nil
+}
+
+// PendingCheckoutByUserAndPlan mengembalikan checkout pending yang sudah ada
+// untuk (user_id, plan_id) yang sama agar tidak terjadi duplikasi lintas refresh/tab.
+func (r *Repository) PendingCheckoutByUserAndPlan(ctx context.Context, userID, planID string) (CheckoutResponse, bool, error) {
+	const q = `
+		SELECT s.id, s.user_id, s.plan_id, s.status, s.starts_at, s.ends_at,
+		       p.id, p.subscription_id, p.amount_idr, p.status, p.reference
+		FROM payments p
+		JOIN subscriptions s ON s.id = p.subscription_id
+		WHERE s.user_id = $1 AND s.plan_id = $2
+		  AND s.status = 'pending' AND p.status = 'pending'
+		ORDER BY s.created_at ASC
+		LIMIT 1`
+	var res CheckoutResponse
+	err := r.pool.QueryRow(ctx, q, userID, planID).Scan(
+		&res.Subscription.ID, &res.Subscription.UserID, &res.Subscription.PlanID,
+		&res.Subscription.Status, &res.Subscription.StartsAt, &res.Subscription.EndsAt,
+		&res.Payment.ID, &res.Payment.SubscriptionID, &res.Payment.AmountIDR,
+		&res.Payment.Status, &res.Payment.Reference,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return CheckoutResponse{}, false, nil
+	}
+	if err != nil {
+		return CheckoutResponse{}, false, fmt.Errorf("subscription repository: lookup pending checkout gagal: %w", err)
 	}
 	res.MockGatewayURL = "/api/v1/subscription/payments/" + res.Payment.Reference + "/confirm"
 	return res, true, nil

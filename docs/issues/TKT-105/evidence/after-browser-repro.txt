@@ -1,0 +1,18 @@
+TKT-105 live browser verification PASSED on http://localhost:3000/pricing (isolatedContext=tkt105-verify-clean, pageId=74):
+
+1. Account setup:
+   - Registered fresh account `tkt105-browser-fresh1@example.com` (`TKT105 Browser`) at `http://localhost:3000/register` -> `POST http://localhost:8080/api/v1/auth/register` [201] (OPTIONS [204]).
+   - Navigated to `http://localhost:3000/pricing`.
+
+2. Rapid double-click under Slow 3G throttling (`Premium 1 Hari` / `planCode: "premium_1d"`):
+   - Button state immediately after double-click: `button "Memproses..." disableable disabled` (all other "Berlangganan" buttons also became `disabled`).
+   - Network request count for checkout: 1 OPTIONS + 1 POST (no duplicate POST fired).
+   - CORS preflight: `OPTIONS http://localhost:8080/api/v1/subscription/checkout` -> `204`
+   - Checkout request: `POST http://localhost:8080/api/v1/subscription/checkout` -> `201` (`code: 20102`, `message: "checkout dibuat"`, `idempotency-key: a918d89b-f3e3-4f4c-997b-1d1b2470165c`)
+   - Navigated to: `http://localhost:3000/checkout/59a22db9fd9b575e73a18ca2`
+   - First reference: `59a22db9fd9b575e73a18ca2`
+
+3. Navigate back to `/pricing`, reload, and click `Premium 1 Hari` "Berlangganan" again:
+   - Checkout request: `POST http://localhost:8080/api/v1/subscription/checkout` -> `201` (`idempotency-key: f16df764-79ec-4e79-aae4-c9435c3cbd4a`)
+   - Navigated to: `http://localhost:3000/checkout/59a22db9fd9b575e73a18ca2`
+   - Second reference: `59a22db9fd9b575e73a18ca2` (exact match with first reference; same `subscription.id`: `d1f9df11-00c4-4137-88c6-56ba25fef48d` and `payment.id`: `548eb8a8-317e-455f-9ae9-f141154b35ec`).

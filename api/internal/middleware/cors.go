@@ -27,7 +27,7 @@ func CORS(allowedOrigins string) func(http.Handler) http.Handler {
 				h.Set("Access-Control-Allow-Credentials", "true")
 				h.Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 				h.Set("Access-Control-Allow-Headers",
-					"Content-Type, Authorization, X-Requested-With")
+					"Content-Type, Authorization, X-Requested-With, Idempotency-Key")
 				h.Set("Access-Control-Max-Age", "86400")
 			}
 			// Jawab preflight langsung, jangan sampai jatuh ke route handler

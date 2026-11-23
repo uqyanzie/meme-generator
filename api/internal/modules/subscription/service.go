@@ -37,7 +37,7 @@ func (s *Service) ListPlans(ctx context.Context) ([]Plan, error) {
 // Checkout membuat checkout baru; jika idempotencyKey pernah dipakai,
 // checkout yang sama dikembalikan (replay) tanpa membuat baris baru.
 func (s *Service) Checkout(ctx context.Context, userID string, dto CheckoutDTO, idempotencyKey string) (CheckoutResponse, error) {
-	if prev, ok, err := s.repo.CheckoutByIdempotencyKey(ctx, idempotencyKey); err != nil {
+	if prev, ok, err := s.repo.CheckoutByIdempotencyKey(ctx, userID, idempotencyKey); err != nil {
 		return CheckoutResponse{}, err
 	} else if ok {
 		return prev, nil
@@ -51,9 +51,23 @@ func (s *Service) Checkout(ctx context.Context, userID string, dto CheckoutDTO, 
 		return CheckoutResponse{}, ErrAlreadySubscribed
 	}
 
+	if pending, ok, err := s.repo.PendingCheckoutByUserAndPlan(ctx, userID, plan.ID); err != nil {
+		return CheckoutResponse{}, err
+	} else if ok {
+		return pending, nil
+	}
+
 	reference := token.RandomHex(12)
 	sub, pay, err := s.repo.CreateSubscription(ctx, userID, plan, reference, idempotencyKey)
 	if err != nil {
+		if isUniqueViolation(err) {
+			if prev, ok, lookupErr := s.repo.CheckoutByIdempotencyKey(ctx, userID, idempotencyKey); lookupErr == nil && ok {
+				return prev, nil
+			}
+			if pending, ok, lookupErr := s.repo.PendingCheckoutByUserAndPlan(ctx, userID, plan.ID); lookupErr == nil && ok {
+				return pending, nil
+			}
+		}
 		return CheckoutResponse{}, err
 	}
 	url, err := s.gateway.CreateCharge(ctx, pay.AmountIDR, reference)

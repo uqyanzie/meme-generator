@@ -1,0 +1,45 @@
+TKT-105 Before Reproduction Evidence — Live Browser (Chrome DevTools)
+Captured: 2026-11-23 (against unmodified HEAD)
+Stack: Next.js Web (http://localhost:3000) + Go API (http://localhost:8080)
+Conditions: Isolated browser context, fresh user tkt105-browser-repro@example.com,
+            /pricing page, Network throttled to Slow 3G, clicked first plan
+            ("Premium 1 Hari") "Berlangganan" button twice 150ms apart.
+
+=== 1. Button state while request was in flight ===
+The "Berlangganan" button had NO disabled attribute/property and NO loading label/state while pending:
+- before_click_1 (t=1795371510798): disabled: false, disabledAttr: null, ariaDisabled: null, text: "Berlangganan"
+- after_click_1_in_flight (t=1795371510960, +162ms): disabled: false, disabledAttr: null, ariaDisabled: null, text: "Berlangganan"
+- after_click_2_in_flight (t=1795371511112, +152ms): disabled: false, disabledAttr: null, ariaDisabled: null, text: "Berlangganan"
+
+=== 2. Network requests fired ===
+2 POST /api/v1/subscription/checkout requests were fired (each preceded by an OPTIONS preflight):
+- reqid=37 POST http://localhost:8080/api/v1/subscription/checkout [net::ERR_FAILED]
+- reqid=38 OPTIONS http://localhost:8080/api/v1/subscription/checkout [204]
+- reqid=39 POST http://localhost:8080/api/v1/subscription/checkout [net::ERR_FAILED]
+- reqid=40 OPTIONS http://localhost:8080/api/v1/subscription/checkout [204]
+
+=== 3. Per-request verbatim details ===
+Request 1 (reqid=37):
+- idempotency-key: c8e80979-5a57-45d8-b4fd-3644a5924490
+- Request body: {"planCode":"premium_1d"}
+- HTTP status: net::ERR_FAILED (blocked by CORS preflight)
+
+Request 2 (reqid=39):
+- idempotency-key: 4405575d-edac-4c84-8e56-3f882fb68006 (different UUID generated per click)
+- Request body: {"planCode":"premium_1d"}
+- HTTP status: net::ERR_FAILED (blocked by CORS preflight)
+
+=== 4. Additional Live Browser Defect: CORS preflight rejects Idempotency-Key ===
+Preflight OPTIONS request (reqid=38, status 204):
+- Request header:  access-control-request-headers: content-type,idempotency-key
+- Request header:  access-control-request-method: POST
+- Request header:  origin: http://localhost:3000
+- Response header: access-control-allow-headers: Content-Type, Authorization, X-Requested-With
+- Response header: access-control-allow-origin: http://localhost:3000
+- Response header: access-control-allow-credentials: true
+
+Console error (logged twice, msgid=10 and msgid=12):
+Access to XMLHttpRequest at 'http://localhost:8080/api/v1/subscription/checkout' from origin 'http://localhost:3000' has been blocked by CORS policy: Request header field idempotency-key is not allowed by Access-Control-Allow-Headers in preflight response.
+
+UI error displayed on /pricing:
+"Tidak bisa terhubung ke server API — pastikan backend berjalan"
