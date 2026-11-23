@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -27,21 +28,17 @@ type apiEnvelope struct {
 	Data    json.RawMessage `json:"data"`
 }
 
-func assertSignedHeaders(t *testing.T, rawURL string, want ...string) {
+func assertSignedUploadURL(t *testing.T, rawURL string) {
 	t.Helper()
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
-		t.Fatalf("parse presigned url %q: %v", rawURL, err)
+		t.Fatalf("parse upload url %q: %v", rawURL, err)
 	}
-	signed := strings.Split(parsed.Query().Get("X-Amz-SignedHeaders"), ";")
-	set := make(map[string]bool, len(signed))
-	for _, h := range signed {
-		set[strings.ToLower(strings.TrimSpace(h))] = true
+	if parsed.Path != "/api/v1/memes/upload-object" {
+		t.Errorf("upload url path = %q, want /api/v1/memes/upload-object", parsed.Path)
 	}
-	for _, w := range want {
-		if !set[w] {
-			t.Errorf("expected X-Amz-SignedHeaders (%q) to contain %q", parsed.Query().Get("X-Amz-SignedHeaders"), w)
-		}
+	if parsed.Query().Get("token") == "" {
+		t.Errorf("expected non-empty token query param in %q", rawURL)
 	}
 }
 
@@ -56,11 +53,30 @@ func TestHandler_UploadErrorStatusMapping(t *testing.T) {
 		t.Fatalf("issue token: %v", err)
 	}
 
+	var (
+		mu         sync.Mutex
+		s3PutCount int
+		lastPutCT  string
+		lastPutLen int
+	)
+	s3Srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		if r.Method == http.MethodPut {
+			s3PutCount++
+			lastPutCT = r.Header.Get("Content-Type")
+			lastPutLen = len(body)
+		}
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer s3Srv.Close()
+
 	repo := meme.NewPostgresRepository(pool)
-	svc := meme.NewService(repo, newStubS3Client(t, "http://localhost:3900"), config.StorageConfig{
+	svc := meme.NewService(repo, newStubS3Client(t, s3Srv.URL), config.StorageConfig{
 		Bucket:        "meme-portal",
 		PublicBaseURL: "http://localhost:3902/meme-portal",
-	}, stubGate{})
+	}, stubGate{}, "test-secret")
 	h := meme.NewHandler(svc)
 
 	mux := http.NewServeMux()
@@ -176,7 +192,7 @@ func TestHandler_UploadErrorStatusMapping(t *testing.T) {
 		t.Fatalf("expected 0 orphan DB rows after rejected uploads, got %d", total)
 	}
 
-	// 2. Valid PrepareUpload at exact 5 MiB boundary signs both content-length and content-type.
+	// 2. Valid PrepareUpload at exact 5 MiB boundary returns signed upload URL.
 	rec, env := doJSON(http.MethodPost, "/api/v1/memes/upload", map[string]any{
 		"title":       "boundary",
 		"filename":    "ok.png",
@@ -190,9 +206,10 @@ func TestHandler_UploadErrorStatusMapping(t *testing.T) {
 	if err := json.Unmarshal(env.Data, &prepared); err != nil {
 		t.Fatalf("decode prepared data: %v", err)
 	}
-	assertSignedHeaders(t, prepared.UploadURL, "content-length", "content-type")
+	assertSignedUploadURL(t, prepared.UploadURL)
 
-	// 2b. Backward-compatible PrepareUpload (omitting fileSize, and omitting both contentType & fileSize).
+	// 2b. Backward-compatible PrepareUpload (omitting fileSize) STILL enforces <= 5 MiB on PUT!
+	var compatUploadURL string
 	t.Run("PrepareUpload/omit fileSize", func(t *testing.T) {
 		rec, env := doJSON(http.MethodPost, "/api/v1/memes/upload", map[string]any{
 			"title":       "compat-api",
@@ -206,7 +223,8 @@ func TestHandler_UploadErrorStatusMapping(t *testing.T) {
 		if err := json.Unmarshal(env.Data, &res); err != nil {
 			t.Fatalf("decode data: %v", err)
 		}
-		assertSignedHeaders(t, res.UploadURL, "content-type")
+		assertSignedUploadURL(t, res.UploadURL)
+		compatUploadURL = res.UploadURL
 	})
 
 	t.Run("PrepareUpload/omit contentType and fileSize", func(t *testing.T) {
@@ -221,10 +239,97 @@ func TestHandler_UploadErrorStatusMapping(t *testing.T) {
 		if err := json.Unmarshal(env.Data, &res); err != nil {
 			t.Fatalf("decode data: %v", err)
 		}
-		assertSignedHeaders(t, res.UploadURL, "content-type")
+		assertSignedUploadURL(t, res.UploadURL)
 	})
 
-	// 3. ResultUpload error status mapping, backward-compatible empty body & valid presign.
+	// 2c. UploadObject enforcement tests (TKT-108 regression: 11MB upload when fileSize was omitted).
+	doPut := func(rawURL string, body []byte, contentType string, unknownLength bool) *httptest.ResponseRecorder {
+		t.Helper()
+		parsed, err := url.Parse(rawURL)
+		if err != nil {
+			t.Fatalf("parse url: %v", err)
+		}
+		var reader io.Reader = bytes.NewReader(body)
+		if unknownLength {
+			reader = struct{ io.Reader }{bytes.NewReader(body)}
+		}
+		req := httptest.NewRequest(http.MethodPut, parsed.RequestURI(), reader)
+		if unknownLength {
+			req.ContentLength = -1
+		}
+		if contentType != "" {
+			req.Header.Set("Content-Type", contentType)
+		}
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		return rec
+	}
+
+	t.Run("UploadObject/reject 11MB when fileSize omitted", func(t *testing.T) {
+		elevenMB := make([]byte, 11<<20)
+		rec := doPut(compatUploadURL, elevenMB, "image/png", false)
+		if rec.Code != http.StatusRequestEntityTooLarge {
+			t.Fatalf("11MB PUT status = %d, want %d (body: %s)", rec.Code, http.StatusRequestEntityTooLarge, rec.Body.String())
+		}
+		mu.Lock()
+		puts := s3PutCount
+		mu.Unlock()
+		if puts != 0 {
+			t.Fatalf("expected 0 S3 puts for rejected 11MB upload, got %d", puts)
+		}
+	})
+
+	t.Run("UploadObject/reject chunked >5MiB when Content-Length omitted", func(t *testing.T) {
+		overLimit := make([]byte, testMaxUploadBytes+1024)
+		rec := doPut(compatUploadURL, overLimit, "image/png", true)
+		if rec.Code != http.StatusRequestEntityTooLarge {
+			t.Fatalf("chunked >5MiB PUT status = %d, want %d (body: %s)", rec.Code, http.StatusRequestEntityTooLarge, rec.Body.String())
+		}
+	})
+
+	t.Run("UploadObject/reject tampered Content-Type", func(t *testing.T) {
+		rec := doPut(compatUploadURL, []byte("<html>xss</html>"), "text/html", false)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("tampered CT status = %d, want %d (body: %s)", rec.Code, http.StatusForbidden, rec.Body.String())
+		}
+	})
+
+	t.Run("UploadObject/reject tampered size when fileSize declared", func(t *testing.T) {
+		rec := doPut(prepared.UploadURL, []byte("small-payload"), "image/png", false)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("tampered size status = %d, want %d (body: %s)", rec.Code, http.StatusForbidden, rec.Body.String())
+		}
+	})
+
+	t.Run("UploadObject/reject invalid token", func(t *testing.T) {
+		rec := doPut("http://example.com/api/v1/memes/upload-object?token=forged.token", []byte("png"), "image/png", false)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("invalid token status = %d, want %d", rec.Code, http.StatusForbidden)
+		}
+	})
+
+	t.Run("UploadObject/reject empty body", func(t *testing.T) {
+		rec := doPut(compatUploadURL, nil, "image/png", false)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("empty body status = %d, want %d", rec.Code, http.StatusBadRequest)
+		}
+	})
+
+	t.Run("UploadObject/accept valid small upload and forward to S3", func(t *testing.T) {
+		payload := []byte("valid-png-bytes")
+		rec := doPut(compatUploadURL, payload, "image/png", false)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("valid PUT status = %d, want %d (body: %s)", rec.Code, http.StatusOK, rec.Body.String())
+		}
+		mu.Lock()
+		puts, ct, gotLen := s3PutCount, lastPutCT, lastPutLen
+		mu.Unlock()
+		if puts != 1 || ct != "image/png" || gotLen != len(payload) {
+			t.Fatalf("unexpected S3 put: count=%d ct=%q len=%d", puts, ct, gotLen)
+		}
+	})
+
+	// 3. ResultUpload error status mapping, backward-compatible empty body & valid signed URL.
 	t.Run("ResultUpload/empty body backward-compatible", func(t *testing.T) {
 		rec, env := doJSON(http.MethodPost, "/api/v1/memes/"+prepared.ID+"/result-upload", nil)
 		if rec.Code != http.StatusOK {
@@ -234,7 +339,13 @@ func TestHandler_UploadErrorStatusMapping(t *testing.T) {
 		if err := json.Unmarshal(env.Data, &res); err != nil {
 			t.Fatalf("decode result data: %v", err)
 		}
-		assertSignedHeaders(t, res.UploadURL, "content-type")
+		assertSignedUploadURL(t, res.UploadURL)
+
+		// 11MB PUT to result upload URL is also rejected.
+		rec11 := doPut(res.UploadURL, make([]byte, 11<<20), "image/png", false)
+		if rec11.Code != http.StatusRequestEntityTooLarge {
+			t.Fatalf("result 11MB PUT status = %d, want %d", rec11.Code, http.StatusRequestEntityTooLarge)
+		}
 	})
 
 	t.Run("ResultUpload/invalid json", func(t *testing.T) {
@@ -276,6 +387,6 @@ func TestHandler_UploadErrorStatusMapping(t *testing.T) {
 		if err := json.Unmarshal(env.Data, &res); err != nil {
 			t.Fatalf("decode result data: %v", err)
 		}
-		assertSignedHeaders(t, res.UploadURL, "content-length", "content-type")
+		assertSignedUploadURL(t, res.UploadURL)
 	})
 }

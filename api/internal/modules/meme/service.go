@@ -1,12 +1,15 @@
 package meme
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
 	"mime"
+	"net/url"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -24,20 +27,35 @@ type Gate interface {
 }
 
 type Service struct {
-	repo    *Repository
-	s3      *s3.Client
-	bucket  string
-	baseURL string // public base URL Garage web endpoint
-	gate    Gate
+	repo         *Repository
+	s3           *s3.Client
+	bucket       string
+	baseURL      string // public base URL Garage web endpoint
+	gate         Gate
+	uploadSecret []byte
 }
 
-func NewService(repo *Repository, s3Client *s3.Client, cfg config.StorageConfig, gate Gate) *Service {
-	return &Service{repo: repo, s3: s3Client, bucket: cfg.Bucket, baseURL: cfg.PublicBaseURL, gate: gate}
+func NewService(repo *Repository, s3Client *s3.Client, cfg config.StorageConfig, gate Gate, uploadSecret string) *Service {
+	secret := uploadSecret
+	if secret == "" {
+		secret = cfg.SecretKey
+	}
+	if secret == "" {
+		secret = "meme-upload-fallback"
+	}
+	return &Service{
+		repo:         repo,
+		s3:           s3Client,
+		bucket:       cfg.Bucket,
+		baseURL:      cfg.PublicBaseURL,
+		gate:         gate,
+		uploadSecret: []byte(secret),
+	}
 }
 
-// PrepareUpload membuat record meme (pending) dan mengembalikan presigned PUT URL
-// untuk mengunggah gambar dasar langsung ke S3/Garage.
-func (s *Service) PrepareUpload(ctx context.Context, userID, title, ext, contentType string, fileSize *int64) (UploadResponse, error) {
+// PrepareUpload membuat record meme (pending) dan mengembalikan signed upload URL
+// yang menegakkan batas ukuran & MIME sebelum meneruskan objek ke S3/Garage.
+func (s *Service) PrepareUpload(ctx context.Context, userID, title, ext, contentType string, fileSize *int64, uploadBaseURL string) (UploadResponse, error) {
 	normExt, normMIME, err := validateImageUpload(ext, contentType, fileSize)
 	if err != nil {
 		return UploadResponse{}, err
@@ -54,25 +72,26 @@ func (s *Service) PrepareUpload(ctx context.Context, userID, title, ext, content
 		return UploadResponse{}, err
 	}
 
-	presign := s3.NewPresignClient(s.s3)
-	input := &s3.PutObjectInput{
-		Bucket:      &s.bucket,
-		Key:         &objectKey,
-		ContentType: aws.String(normMIME),
-	}
+	var exactSize int64
 	if fileSize != nil {
-		input.ContentLength = aws.Int64(*fileSize)
+		exactSize = *fileSize
 	}
-	req, err := presign.PresignPutObject(ctx, input, s3.WithPresignExpires(maxPresignTTL))
+	uploadURL, err := s.buildUploadURL(uploadBaseURL, uploadTokenClaims{
+		Key:      objectKey,
+		MIME:     normMIME,
+		MaxBytes: maxUploadBytes,
+		Size:     exactSize,
+		Exp:      time.Now().Add(maxPresignTTL).Unix(),
+	})
 	if err != nil {
-		return UploadResponse{}, fmt.Errorf("meme service: presign gagal: %w", err)
+		return UploadResponse{}, fmt.Errorf("meme service: sign upload url gagal: %w", err)
 	}
-	return UploadResponse{ID: m.ID, UploadURL: req.URL, BaseURL: m.BaseImageURL}, nil
+	return UploadResponse{ID: m.ID, UploadURL: uploadURL, BaseURL: m.BaseImageURL}, nil
 }
 
-// ResultUpload mengembalikan presigned PUT URL untuk gambar hasil render
+// ResultUpload mengembalikan signed upload URL untuk gambar hasil render
 // (canvas) milik meme <id>; complete kemudian menyimpan URL publiknya.
-func (s *Service) ResultUpload(ctx context.Context, userID, id string, fileSize *int64) (UploadResponse, error) {
+func (s *Service) ResultUpload(ctx context.Context, userID, id string, fileSize *int64, uploadBaseURL string) (UploadResponse, error) {
 	if err := s.gate.HasActiveSubscription(ctx, userID); err != nil {
 		return UploadResponse{}, err
 	}
@@ -84,20 +103,47 @@ func (s *Service) ResultUpload(ctx context.Context, userID, id string, fileSize 
 	}
 	objectKey := fmt.Sprintf("result/%s.png", id)
 
-	presign := s3.NewPresignClient(s.s3)
-	input := &s3.PutObjectInput{
-		Bucket:      &s.bucket,
-		Key:         &objectKey,
-		ContentType: aws.String("image/png"),
-	}
+	var exactSize int64
 	if fileSize != nil {
-		input.ContentLength = aws.Int64(*fileSize)
+		exactSize = *fileSize
 	}
-	req, err := presign.PresignPutObject(ctx, input, s3.WithPresignExpires(maxPresignTTL))
+	uploadURL, err := s.buildUploadURL(uploadBaseURL, uploadTokenClaims{
+		Key:      objectKey,
+		MIME:     "image/png",
+		MaxBytes: maxUploadBytes,
+		Size:     exactSize,
+		Exp:      time.Now().Add(maxPresignTTL).Unix(),
+	})
 	if err != nil {
-		return UploadResponse{}, fmt.Errorf("meme service: presign gagal: %w", err)
+		return UploadResponse{}, fmt.Errorf("meme service: sign upload url gagal: %w", err)
 	}
-	return UploadResponse{ID: id, UploadURL: req.URL, BaseURL: s.publicURL(objectKey)}, nil
+	return UploadResponse{ID: id, UploadURL: uploadURL, BaseURL: s.publicURL(objectKey)}, nil
+}
+
+func (s *Service) buildUploadURL(uploadBaseURL string, claims uploadTokenClaims) (string, error) {
+	tok, err := signUploadToken(s.uploadSecret, claims)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s/api/v1/memes/upload-object?token=%s", strings.TrimRight(uploadBaseURL, "/"), url.QueryEscape(tok)), nil
+}
+
+func (s *Service) VerifyUploadToken(raw string) (uploadTokenClaims, error) {
+	return verifyUploadToken(s.uploadSecret, raw, time.Now())
+}
+
+func (s *Service) PutObject(ctx context.Context, key, contentType string, data []byte) error {
+	_, err := s.s3.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:        &s.bucket,
+		Key:           &key,
+		Body:          bytes.NewReader(data),
+		ContentLength: aws.Int64(int64(len(data))),
+		ContentType:   aws.String(contentType),
+	})
+	if err != nil {
+		return fmt.Errorf("meme service: s3 put object gagal: %w", err)
+	}
+	return nil
 }
 
 func (s *Service) Complete(ctx context.Context, userID, id, resultURL string) (Meme, error) {

@@ -48,7 +48,7 @@ func Mount(mux *http.ServeMux, pool *pgxpool.Pool, rdb *redis.Client, s3Client *
 	subHandler := subscription.NewModule(pool)
 	subSvc := subscription.NewService(subscription.NewPostgresRepository(pool), subscription.MockGateway{})
 
-	memeHandler := meme.NewModule(pool, s3Client, cfg.Storage, subscriptionGate{sub: subSvc})
+	memeHandler := meme.NewModule(pool, s3Client, cfg.Storage, subscriptionGate{sub: subSvc}, cfg.JWT.Secret)
 
 	auth.RegisterRoutes(mux, authHandler, authMW)
 	subscription.RegisterRoutes(mux, subHandler, authMW)

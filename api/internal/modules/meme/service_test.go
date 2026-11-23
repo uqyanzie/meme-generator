@@ -67,7 +67,7 @@ func TestService_Delete_BestEffortS3Cleanup(t *testing.T) {
 	svc := meme.NewService(repo, newStubS3Client(t, srv.URL), config.StorageConfig{
 		Bucket:        "meme-portal",
 		PublicBaseURL: baseURL,
-	}, stubGate{})
+	}, stubGate{}, "test-secret")
 
 	// 1. Owned meme with both base and result URLs -> sends S3 DELETE for both keys.
 	m1, err := repo.Create(ctx, meme.Meme{
@@ -138,7 +138,7 @@ func TestService_PrepareUpload_Validation(t *testing.T) {
 	svc := meme.NewService(repo, newStubS3Client(t, "http://localhost:3900"), config.StorageConfig{
 		Bucket:        "meme-portal",
 		PublicBaseURL: "http://localhost:3902/meme-portal",
-	}, stubGate{})
+	}, stubGate{}, "test-secret")
 
 	const maxBytes int64 = 5 << 20
 	sizePtr := func(v int64) *int64 { return &v }
@@ -166,7 +166,7 @@ func TestService_PrepareUpload_Validation(t *testing.T) {
 
 	for _, tc := range invalidCases {
 		t.Run("reject/"+tc.name, func(t *testing.T) {
-			_, err := svc.PrepareUpload(ctx, userID, tc.name, tc.ext, tc.contentType, tc.fileSize)
+			_, err := svc.PrepareUpload(ctx, userID, tc.name, tc.ext, tc.contentType, tc.fileSize, "http://localhost:8080")
 			if !errors.Is(err, tc.wantErr) {
 				t.Fatalf("PrepareUpload(%q, %q, %v) err = %v, want %v", tc.ext, tc.contentType, tc.fileSize, err, tc.wantErr)
 			}
@@ -174,28 +174,27 @@ func TestService_PrepareUpload_Validation(t *testing.T) {
 	}
 
 	validCases := []struct {
-		name            string
-		ext             string
-		contentType     string
-		fileSize        *int64
-		wantSignedHdrs  []string
+		name        string
+		ext         string
+		contentType string
+		fileSize    *int64
 	}{
-		{"jpg", ".jpg", "image/jpeg", sizePtr(1024), []string{"content-length", "content-type"}},
-		{"uppercase JPEG + MIME", ".JPEG", "IMAGE/JPEG", sizePtr(maxBytes), []string{"content-length", "content-type"}},
-		{"png with params", ".png", "image/png; charset=binary", sizePtr(maxBytes), []string{"content-length", "content-type"}},
-		{"gif", ".gif", "image/gif", sizePtr(2048), []string{"content-length", "content-type"}},
-		{"webp", ".webp", "image/webp", sizePtr(4096), []string{"content-length", "content-type"}},
-		{"omitted fileSize", ".png", "image/png", nil, []string{"content-type"}},
-		{"omitted contentType and fileSize", ".png", "", nil, []string{"content-type"}},
+		{"jpg", ".jpg", "image/jpeg", sizePtr(1024)},
+		{"uppercase JPEG + MIME", ".JPEG", "IMAGE/JPEG", sizePtr(maxBytes)},
+		{"png with params", ".png", "image/png; charset=binary", sizePtr(maxBytes)},
+		{"gif", ".gif", "image/gif", sizePtr(2048)},
+		{"webp", ".webp", "image/webp", sizePtr(4096)},
+		{"omitted fileSize", ".png", "image/png", nil},
+		{"omitted contentType and fileSize", ".png", "", nil},
 	}
 
 	for _, tc := range validCases {
 		t.Run("accept/"+tc.name, func(t *testing.T) {
-			res, err := svc.PrepareUpload(ctx, userID, tc.name, tc.ext, tc.contentType, tc.fileSize)
+			res, err := svc.PrepareUpload(ctx, userID, tc.name, tc.ext, tc.contentType, tc.fileSize, "http://localhost:8080")
 			if err != nil {
 				t.Fatalf("PrepareUpload(%q, %q, %v) unexpected err: %v", tc.ext, tc.contentType, tc.fileSize, err)
 			}
-			assertSignedHeaders(t, res.UploadURL, tc.wantSignedHdrs...)
+			assertSignedUploadURL(t, res.UploadURL)
 		})
 	}
 }
@@ -209,7 +208,7 @@ func TestService_ResultUpload_Validation(t *testing.T) {
 	svc := meme.NewService(repo, newStubS3Client(t, "http://localhost:3900"), config.StorageConfig{
 		Bucket:        "meme-portal",
 		PublicBaseURL: "http://localhost:3902/meme-portal",
-	}, stubGate{})
+	}, stubGate{}, "test-secret")
 
 	const maxBytes int64 = 5 << 20
 	sizePtr := func(v int64) *int64 { return &v }
@@ -223,25 +222,25 @@ func TestService_ResultUpload_Validation(t *testing.T) {
 		t.Fatalf("create meme: %v", err)
 	}
 
-	if _, err := svc.ResultUpload(ctx, userID, m.ID, sizePtr(0)); !errors.Is(err, meme.ErrInvalidFile) {
+	if _, err := svc.ResultUpload(ctx, userID, m.ID, sizePtr(0), "http://localhost:8080"); !errors.Is(err, meme.ErrInvalidFile) {
 		t.Fatalf("expected ErrInvalidFile for size 0, got %v", err)
 	}
-	if _, err := svc.ResultUpload(ctx, userID, m.ID, sizePtr(-5)); !errors.Is(err, meme.ErrInvalidFile) {
+	if _, err := svc.ResultUpload(ctx, userID, m.ID, sizePtr(-5), "http://localhost:8080"); !errors.Is(err, meme.ErrInvalidFile) {
 		t.Fatalf("expected ErrInvalidFile for size -5, got %v", err)
 	}
-	if _, err := svc.ResultUpload(ctx, userID, m.ID, sizePtr(maxBytes+1)); !errors.Is(err, meme.ErrFileTooLarge) {
+	if _, err := svc.ResultUpload(ctx, userID, m.ID, sizePtr(maxBytes+1), "http://localhost:8080"); !errors.Is(err, meme.ErrFileTooLarge) {
 		t.Fatalf("expected ErrFileTooLarge for size maxBytes+1, got %v", err)
 	}
 
-	resCompat, err := svc.ResultUpload(ctx, userID, m.ID, nil)
+	resCompat, err := svc.ResultUpload(ctx, userID, m.ID, nil, "http://localhost:8080")
 	if err != nil {
 		t.Fatalf("ResultUpload with nil size failed: %v", err)
 	}
-	assertSignedHeaders(t, resCompat.UploadURL, "content-type")
+	assertSignedUploadURL(t, resCompat.UploadURL)
 
-	res, err := svc.ResultUpload(ctx, userID, m.ID, sizePtr(maxBytes))
+	res, err := svc.ResultUpload(ctx, userID, m.ID, sizePtr(maxBytes), "http://localhost:8080")
 	if err != nil {
 		t.Fatalf("ResultUpload at boundary failed: %v", err)
 	}
-	assertSignedHeaders(t, res.UploadURL, "content-length", "content-type")
+	assertSignedUploadURL(t, res.UploadURL)
 }

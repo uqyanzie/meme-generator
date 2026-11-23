@@ -115,7 +115,7 @@ func newTestMemeService(pool *pgxpool.Pool, gate meme.Gate) *meme.Service {
 		Bucket:        "memes",
 		PublicBaseURL: "http://localhost:3902",
 	}
-	return meme.NewService(meme.NewPostgresRepository(pool), s3Client, cfg, gate)
+	return meme.NewService(meme.NewPostgresRepository(pool), s3Client, cfg, gate, "test-secret")
 }
 
 func seedUserWithPlan(t *testing.T, pool *pgxpool.Pool, planCode string) (userID, subID string) {
@@ -171,7 +171,7 @@ func TestMemeQuota_ConcurrentPrepareUploadEnforcesLimit(t *testing.T) {
 		go func(idx int) {
 			defer wg.Done()
 			<-start
-			_, err := memeSvc.PrepareUpload(ctx, userID, fmt.Sprintf("Meme %d", idx), ".png", "image/png", &size1024)
+			_, err := memeSvc.PrepareUpload(ctx, userID, fmt.Sprintf("Meme %d", idx), ".png", "image/png", &size1024, "http://localhost:8080")
 			switch {
 			case err == nil:
 				succeeded.Add(1)
@@ -218,7 +218,7 @@ func TestMemeQuota_FinalAllowedMemeCanResultUploadAndComplete(t *testing.T) {
 	size1024 := int64(1024)
 	var tenthMemeID string
 	for i := 1; i <= 10; i++ {
-		res, err := memeSvc.PrepareUpload(ctx, userID, fmt.Sprintf("Seq %d", i), ".png", "image/png", &size1024)
+		res, err := memeSvc.PrepareUpload(ctx, userID, fmt.Sprintf("Seq %d", i), ".png", "image/png", &size1024, "http://localhost:8080")
 		if err != nil {
 			t.Fatalf("PrepareUpload #%d failed: %v", i, err)
 		}
@@ -226,12 +226,12 @@ func TestMemeQuota_FinalAllowedMemeCanResultUploadAndComplete(t *testing.T) {
 	}
 
 	// 11th meme must be blocked.
-	if _, err := memeSvc.PrepareUpload(ctx, userID, "Seq 11", ".png", "image/png", &size1024); !errors.Is(err, meme.ErrNotSubscribedGate) {
+	if _, err := memeSvc.PrepareUpload(ctx, userID, "Seq 11", ".png", "image/png", &size1024, "http://localhost:8080"); !errors.Is(err, meme.ErrNotSubscribedGate) {
 		t.Fatalf("expected 11th PrepareUpload to fail with ErrNotSubscribedGate, got %v", err)
 	}
 
 	// 10th meme must still be allowed to ResultUpload and Complete.
-	if _, err := memeSvc.ResultUpload(ctx, userID, tenthMemeID, &size1024); err != nil {
+	if _, err := memeSvc.ResultUpload(ctx, userID, tenthMemeID, &size1024, "http://localhost:8080"); err != nil {
 		t.Fatalf("expected ResultUpload on 10th meme to succeed, got: %v", err)
 	}
 
@@ -243,7 +243,7 @@ func TestMemeQuota_FinalAllowedMemeCanResultUploadAndComplete(t *testing.T) {
 	if _, err := pool.Exec(ctx, `UPDATE subscriptions SET ends_at = now() - interval '1 minute' WHERE id = $1`, subID); err != nil {
 		t.Fatalf("expire subscription: %v", err)
 	}
-	if _, err := memeSvc.ResultUpload(ctx, userID, tenthMemeID, &size1024); !errors.Is(err, meme.ErrNotSubscribedGate) {
+	if _, err := memeSvc.ResultUpload(ctx, userID, tenthMemeID, &size1024, "http://localhost:8080"); !errors.Is(err, meme.ErrNotSubscribedGate) {
 		t.Fatalf("expected ResultUpload after expiry to fail with ErrNotSubscribedGate, got %v", err)
 	}
 	if _, err := memeSvc.Complete(ctx, userID, tenthMemeID, "http://localhost:3902/results/expired.png"); !errors.Is(err, meme.ErrNotSubscribedGate) {
@@ -271,7 +271,7 @@ func TestMemeQuota_UnlimitedPlanAllowsBeyondStandardLimits(t *testing.T) {
 		go func(idx int) {
 			defer wg.Done()
 			<-start
-			if _, err := memeSvc.PrepareUpload(ctx, userID, fmt.Sprintf("Unlim %d", idx), ".png", "image/png", &size1024); err == nil {
+			if _, err := memeSvc.PrepareUpload(ctx, userID, fmt.Sprintf("Unlim %d", idx), ".png", "image/png", &size1024, "http://localhost:8080"); err == nil {
 				succeeded.Add(1)
 			} else {
 				t.Logf("unexpected error on unlimited req %d: %v", idx, err)
