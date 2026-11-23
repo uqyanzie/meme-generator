@@ -3,6 +3,7 @@ package meme
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"path"
 	"strings"
 
@@ -106,7 +107,54 @@ func (s *Service) List(ctx context.Context, userID string, limit, offset int32) 
 }
 
 func (s *Service) Delete(ctx context.Context, userID, id string) error {
-	return s.repo.Delete(ctx, id, userID)
+	deleted, err := s.repo.Delete(ctx, id, userID)
+	if err != nil {
+		return err
+	}
+	if s.s3 == nil {
+		return nil
+	}
+	urls := []string{deleted.BaseImageURL}
+	if deleted.ResultURL != nil {
+		urls = append(urls, *deleted.ResultURL)
+	}
+	for _, rawURL := range urls {
+		key, ok := s.objectKeyFromURL(rawURL)
+		if !ok {
+			continue
+		}
+		if _, err := s.s3.DeleteObject(ctx, &s3.DeleteObjectInput{
+			Bucket: &s.bucket,
+			Key:    &key,
+		}); err != nil {
+			slog.Warn("meme service: s3 delete gagal", "meme_id", id, "key", key, "err", err)
+		}
+	}
+	return nil
+}
+
+func (s *Service) objectKeyFromURL(rawURL string) (string, bool) {
+	if rawURL == "" {
+		return "", false
+	}
+	var rel string
+	if s.baseURL != "" {
+		prefix := strings.TrimRight(s.baseURL, "/") + "/"
+		if !strings.HasPrefix(rawURL, prefix) {
+			return "", false
+		}
+		rel = strings.TrimPrefix(rawURL, prefix)
+	} else {
+		rel = rawURL
+	}
+	cleaned := path.Clean(strings.TrimLeft(rel, "/"))
+	if cleaned == "." || cleaned == "" || strings.HasPrefix(cleaned, "..") {
+		return "", false
+	}
+	if s.baseURL == "" && !strings.HasPrefix(cleaned, "base/") && !strings.HasPrefix(cleaned, "result/") {
+		return "", false
+	}
+	return cleaned, true
 }
 
 func (s *Service) publicURL(key string) string {

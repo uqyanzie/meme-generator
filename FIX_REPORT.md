@@ -83,3 +83,13 @@ Clicking **Bayar Sekarang (Simulasi)** on `/checkout/[reference]` previously swa
 ### Solution
 - **Frontend:** Replaced `mutateAsync` + empty `catch {}` with `confirm.mutate` + `onSuccess` timer cleanup, added `disabled={confirm.isPending || Boolean(confirm.data)}` and `"Memproses..."` / `"Lunas"` states, rendered `role="alert"` error feedback via `describeError(confirm.error)`, and added `402: "Pembayaran tidak dapat diproses"` to `web/src/lib/errors.ts`.
 - **Verification:** Added 4 Go regression tests in `api/internal/modules/subscription/` (`repository_test.go`, `mount_test.go`), passed `go vet`, `go test`, `go build`, `bun run check`, `bun run lint`, and verified live `role="alert"` error rendering (`docs/issues/TKT-106/evidence/after-browser-repro.txt`).
+
+---
+
+## TKT-107: Unauthorized Viewing and Deletion of Other Users' Memes (IDOR)
+
+- **Status:** Resolved
+- **Detailed Report:** [docs/issues/TKT-107/TKT-107-fix-report.md](./docs/issues/TKT-107/TKT-107-fix-report.md)
+- **Summary:** Any authenticated user could overwrite another user's meme result URL (`POST /api/v1/memes/{id}/complete`) or delete another user's meme (`DELETE /api/v1/memes/{id}`) because `Repository.GetByID`, `Repository.SetResultURL`, and `Repository.Delete` ignored `userID`. Additionally, `GetByID` selected 10 columns into 9 `Scan` arguments, breaking `POST /api/v1/memes/{id}/result-upload` with `500` for everyone.
+- **Changes:** Enforced `WHERE id = $1 AND user_id = $2` (and `$3` for `SetResultURL`) across all three repository methods, fixed the 9-column `GetByID` scan, mapped malformed UUIDs (`22P02`) to `404 Not Found`, and added best-effort Garage S3 object cleanup in `Service.Delete`.
+- **Verification:** Added Go regression tests (`api/internal/modules/meme/repository_test.go`, `api/internal/modules/meme/service_test.go`), passed `go vet`, `go test`, `go build`, `bun run check`, `bun run lint`, and verified live Before vs. After two-user API & S3 cleanup behavior (`docs/issues/TKT-107/evidence/after-api-repro.txt`).

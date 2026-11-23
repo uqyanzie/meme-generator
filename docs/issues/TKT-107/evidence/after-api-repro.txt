@@ -1,0 +1,13 @@
+﻿1. Victim A created meme id=2f6d1076-79e3-45d2-a590-78342e5ef7c1 baseUrl=http://meme-portal.web.garage.localhost:3902/base/dd0f75dab0bda2ccf1183a00
+2. Attacker B POST /memes/2f6d1076-79e3-45d2-a590-78342e5ef7c1/result-upload -> HTTP 404 
+3. Victim A POST /memes/2f6d1076-79e3-45d2-a590-78342e5ef7c1/result-upload -> HTTP 200 resultUrl=http://meme-portal.web.garage.localhost:3902/result/2f6d1076-79e3-45d2-a590-78342e5ef7c1.png
+4. Attacker B POST /memes/2f6d1076-79e3-45d2-a590-78342e5ef7c1/complete -> HTTP 404 
+5. Victim A POST /memes/2f6d1076-79e3-45d2-a590-78342e5ef7c1/complete -> HTTP 200 {"success":true,"code":30104,"message":"meme selesai","data":{"id":"2f6d1076-79e3-45d2-a590-78342e5ef7c1","userId":"19966122-e821-4222-b9f3-e8aaa050123e","title":"Victim Secret Meme","baseUrl":"http://meme-portal.web.garage.localhost:3902/base/dd0f75dab0bda2ccf1183a00","resultUrl":"http://meme-portal.web.garage.localhost:3902/result/2f6d1076-79e3-45d2-a590-78342e5ef7c1.png","topText":"","bottomText":"","fontSize":0,"createdAt":"2026-11-23T23:53:16.675345+07:00"}}
+
+6. Attacker B DELETE /memes/2f6d1076-79e3-45d2-a590-78342e5ef7c1 -> HTTP 404 
+   Victim A GET /memes -> total=1
+7. Victim A DELETE /memes/2f6d1076-79e3-45d2-a590-78342e5ef7c1 -> HTTP 200 {"success":true,"code":30105,"message":"meme dihapus"}
+
+   Victim A GET /memes -> total=0
+   S3 HEAD baseUrl -> HTTP 404 
+   S3 HEAD resultUrl -> HTTP 404 
