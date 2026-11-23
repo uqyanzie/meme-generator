@@ -39,6 +39,39 @@ func (r *Repository) Create(ctx context.Context, m Meme) (Meme, error) {
 	return out, nil
 }
 
+// CreateWithCheck menjalankan fungsi validasi/kuota dan INSERT meme dalam satu
+// transaksi PostgreSQL sehingga pengecekan kuota dan pembuatan baris bersifat atomik.
+func (r *Repository) CreateWithCheck(ctx context.Context, m Meme, check func(ctx context.Context, tx pgx.Tx) error) (Meme, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return Meme{}, fmt.Errorf("meme repository: begin tx gagal: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if check != nil {
+		if err := check(ctx, tx); err != nil {
+			return Meme{}, err
+		}
+	}
+
+	const q = `
+		INSERT INTO memes (user_id, title, base_url, top_text, bottom_text, font_size)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id, user_id, title, base_url, result_url, top_text, bottom_text, font_size, created_at`
+	var out Meme
+	err = tx.QueryRow(ctx, q,
+		m.UserID, m.Title, m.BaseImageURL, m.TopText, m.BottomText, m.FontSize,
+	).Scan(&out.ID, &out.UserID, &out.Title, &out.BaseImageURL, &out.ResultURL,
+		&out.TopText, &out.BottomText, &out.FontSize, &out.CreatedAt)
+	if err != nil {
+		return Meme{}, fmt.Errorf("meme repository: create with check gagal: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Meme{}, fmt.Errorf("meme repository: commit gagal: %w", err)
+	}
+	return out, nil
+}
+
 func (r *Repository) GetByID(ctx context.Context, id, userID string) (Meme, error) {
 	const q = `
 		SELECT id, user_id, title, base_url, result_url, top_text, bottom_text, font_size, created_at

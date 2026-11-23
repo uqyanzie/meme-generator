@@ -11,6 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/nyxsr/meme-portal/api/internal/config"
 	"github.com/nyxsr/meme-portal/api/internal/modules/meme"
@@ -18,7 +19,8 @@ import (
 
 type stubGate struct{}
 
-func (stubGate) CanCreate(context.Context, string) error { return nil }
+func (stubGate) HasActiveSubscription(context.Context, string) error   { return nil }
+func (stubGate) CheckQuotaTx(context.Context, pgx.Tx, string) error { return nil }
 
 func newStubS3Client(t *testing.T, serverURL string) *s3.Client {
 	t.Helper()

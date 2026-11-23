@@ -223,6 +223,35 @@ func (r *Repository) ActiveByUser(ctx context.Context, userID string) (Subscript
 	return sub, p, nil
 }
 
+// ActiveByUserForUpdate mengambil langganan aktif user sambil mengunci baris
+// subscription (FOR UPDATE OF s) di dalam transaksi agar pengecekan kuota
+// bersifat atomik terhadap request konkuren dari user yang sama.
+func (r *Repository) ActiveByUserForUpdate(ctx context.Context, tx pgx.Tx, userID string) (Subscription, Plan, error) {
+	const q = `
+		SELECT s.id, s.user_id, s.plan_id, s.status, s.starts_at, s.ends_at,
+		       p.id, p.code, p.name, p.price_idr, p.duration_days, p.max_memes, p.active
+		FROM subscriptions s
+		JOIN plans p ON p.id = s.plan_id
+		WHERE s.user_id = $1 AND s.status = 'active' AND s.ends_at > now()
+		ORDER BY s.ends_at DESC LIMIT 1
+		FOR UPDATE OF s`
+	var (
+		sub Subscription
+		p   Plan
+	)
+	err := tx.QueryRow(ctx, q, userID).Scan(
+		&sub.ID, &sub.UserID, &sub.PlanID, &sub.Status, &sub.StartsAt, &sub.EndsAt,
+		&p.ID, &p.Code, &p.Name, &p.PriceIDR, &p.Duration, &p.MaxMemes, &p.Active,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Subscription{}, Plan{}, ErrNotSubscribed
+	}
+	if err != nil {
+		return Subscription{}, Plan{}, fmt.Errorf("subscription repository: active by user for update gagal: %w", err)
+	}
+	return sub, p, nil
+}
+
 // MarkExpired menandai semua langganan aktif yang sudah lewat ends_at
 // menjadi 'expired'. Dipanggil janitor periodik; lazy check di
 // ActiveByUser (ends_at > now()) tetap menjadi sumber kebenaran runtime.
@@ -245,6 +274,19 @@ func (r *Repository) MemesUsed(ctx context.Context, userID string, since time.Ti
 	).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("subscription repository: memes used gagal: %w", err)
+	}
+	return n, nil
+}
+
+// MemesUsedTx menghitung meme yang dibuat dalam periode langganan aktif di dalam transaksi.
+func (r *Repository) MemesUsedTx(ctx context.Context, tx pgx.Tx, userID string, since time.Time) (int32, error) {
+	var n int32
+	err := tx.QueryRow(ctx,
+		`SELECT COUNT(*) FROM memes WHERE user_id = $1 AND created_at >= $2`,
+		userID, since,
+	).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("subscription repository: memes used tx gagal: %w", err)
 	}
 	return n, nil
 }

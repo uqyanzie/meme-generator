@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/nyxsr/meme-portal/api/internal/platform/token"
 )
 
@@ -111,4 +113,30 @@ func (s *Service) Status(ctx context.Context, userID string) (SubscriptionStatus
 		}, nil
 	}
 	return SubscriptionStatus{Subscribed: false, MemesUsed: 0, MaxMemes: 0}, nil
+}
+
+// HasActive memastikan user memiliki langganan aktif yang belum kedaluwarsa.
+func (s *Service) HasActive(ctx context.Context, userID string) error {
+	_, _, err := s.repo.ActiveByUser(ctx, userID)
+	return err
+}
+
+// CheckQuotaTx memverifikasi langganan aktif dan sisa kuota meme user secara atomik
+// di dalam transaksi dengan mengunci baris subscription.
+func (s *Service) CheckQuotaTx(ctx context.Context, tx pgx.Tx, userID string) error {
+	_, plan, err := s.repo.ActiveByUserForUpdate(ctx, tx, userID)
+	if err != nil {
+		return err
+	}
+	if plan.MaxMemes > 0 {
+		since := time.Now().AddDate(0, 0, -int(plan.Duration))
+		used, err := s.repo.MemesUsedTx(ctx, tx, userID, since)
+		if err != nil {
+			return err
+		}
+		if used >= plan.MaxMemes {
+			return ErrQuotaExceeded
+		}
+	}
+	return nil
 }

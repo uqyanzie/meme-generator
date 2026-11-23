@@ -1,0 +1,20 @@
+﻿# TKT-109 After Reproduction Evidence (Live API)
+# Timestamp: 2026-11-24T00:45:27.1559075+07:00
+# Base URL: http://localhost:8080
+
+=== AFTER REPRO A: Concurrent PrepareUpload Quota Enforcement ===
+User A: tkt109-after-race-1795455927166@example.com | Plan: premium_1d | Initial: memesUsed=0, maxMemes=10
+Fired 20 concurrent POST /api/v1/memes/upload requests against maxMemes=10:
+  HTTP 201: 10
+  HTTP 403: 10
+Post-race GET /api/v1/subscription/status -> memesUsed=10, maxMemes=10
+Post-race GET /api/v1/memes?limit=50      -> total=10
+
+=== AFTER REPRO B: Final Allowed Meme (#10 of 10) ResultUpload & Complete ===
+User B: tkt109-after-final-1795455927619@example.com | Plan: premium_1d
+Created 10 sequential memes (1..10). 10th meme ID: d89d571d-e52e-4825-952e-739a85db169a
+GET /api/v1/subscription/status -> memesUsed=10, maxMemes=10
+POST /api/v1/memes/d89d571d-e52e-4825-952e-739a85db169a/result-upload -> HTTP 200
+POST /api/v1/memes/d89d571d-e52e-4825-952e-739a85db169a/complete -> HTTP 200
+11th POST /api/v1/memes/upload -> HTTP 403
+

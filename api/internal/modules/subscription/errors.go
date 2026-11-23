@@ -8,4 +8,5 @@ var (
 	ErrNotSubscribed     = errors.New("belum berlangganan")
 	ErrPaymentFailed     = errors.New("pembayaran gagal")
 	ErrNotFound          = errors.New("langganan tidak ditemukan")
+	ErrQuotaExceeded     = errors.New("kuota meme tercapai")
 )

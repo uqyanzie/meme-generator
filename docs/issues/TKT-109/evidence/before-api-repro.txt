@@ -1,0 +1,20 @@
+﻿# TKT-109 Before Reproduction Evidence (Live API)
+# Timestamp: 2026-11-24T00:30:18.4554484+07:00
+# Base URL: http://localhost:8080
+
+=== REPRO A: Concurrent PrepareUpload Quota Bypass (Race Condition) ===
+User A: tkt109-race-1795455018489@example.com | Plan: premium_1d | Initial: memesUsed=0, maxMemes=10
+Fired 20 concurrent POST /api/v1/memes/upload requests against maxMemes=10:
+  HTTP 201: 15
+  HTTP 403: 5
+Post-race GET /api/v1/subscription/status -> memesUsed=15, maxMemes=10
+Post-race GET /api/v1/memes?limit=50      -> total=15
+
+=== REPRO B: Final Allowed Meme (#10 of 10) Blocked on ResultUpload & Complete ===
+User B: tkt109-final-1795455018956@example.com | Plan: premium_1d | Initial: memesUsed=0, maxMemes=10
+Created 10 sequential memes (1..10). 10th meme ID: 417ee21b-ae69-4759-8716-55108e2ccbc3
+GET /api/v1/subscription/status -> memesUsed=10, maxMemes=10
+POST /api/v1/memes/417ee21b-ae69-4759-8716-55108e2ccbc3/result-upload -> HTTP 403
+Response: {"success":false,"code":20002,"message":"butuh langganan aktif untuk membuat meme"}
+POST /api/v1/memes/417ee21b-ae69-4759-8716-55108e2ccbc3/complete -> HTTP 403
+Response: {"success":false,"code":20002,"message":"butuh langganan aktif untuk membuat meme"}

@@ -10,15 +10,17 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/nyxsr/meme-portal/api/internal/config"
 	"github.com/nyxsr/meme-portal/api/internal/platform/token"
 )
 
-// Gate memeriksa apakah user berhak membuat meme (langganan aktif).
+// Gate memeriksa apakah user berhak membuat meme (langganan aktif & kuota).
 // Diimplementasikan oleh modul subscription lewat structural typing.
 type Gate interface {
-	CanCreate(ctx context.Context, userID string) error
+	HasActiveSubscription(ctx context.Context, userID string) error
+	CheckQuotaTx(ctx context.Context, tx pgx.Tx, userID string) error
 }
 
 type Service struct {
@@ -36,18 +38,17 @@ func NewService(repo *Repository, s3Client *s3.Client, cfg config.StorageConfig,
 // PrepareUpload membuat record meme (pending) dan mengembalikan presigned PUT URL
 // untuk mengunggah gambar dasar langsung ke S3/Garage.
 func (s *Service) PrepareUpload(ctx context.Context, userID, title, ext, contentType string, fileSize int64) (UploadResponse, error) {
-	if err := s.gate.CanCreate(ctx, userID); err != nil {
-		return UploadResponse{}, err
-	}
 	normExt, normMIME, err := validateImageUpload(ext, contentType, fileSize)
 	if err != nil {
 		return UploadResponse{}, err
 	}
 	objectKey := fmt.Sprintf("base/%s%s", token.RandomHex(12), normExt)
 
-	m, err := s.repo.Create(ctx, Meme{
+	m, err := s.repo.CreateWithCheck(ctx, Meme{
 		UserID: userID, Title: title,
 		BaseImageURL: s.publicURL(objectKey),
+	}, func(ctx context.Context, tx pgx.Tx) error {
+		return s.gate.CheckQuotaTx(ctx, tx, userID)
 	})
 	if err != nil {
 		return UploadResponse{}, err
@@ -70,7 +71,7 @@ func (s *Service) PrepareUpload(ctx context.Context, userID, title, ext, content
 // ResultUpload mengembalikan presigned PUT URL untuk gambar hasil render
 // (canvas) milik meme <id>; complete kemudian menyimpan URL publiknya.
 func (s *Service) ResultUpload(ctx context.Context, userID, id string, fileSize int64) (UploadResponse, error) {
-	if err := s.gate.CanCreate(ctx, userID); err != nil {
+	if err := s.gate.HasActiveSubscription(ctx, userID); err != nil {
 		return UploadResponse{}, err
 	}
 	if err := validateFileSize(fileSize); err != nil {
@@ -95,7 +96,7 @@ func (s *Service) ResultUpload(ctx context.Context, userID, id string, fileSize 
 }
 
 func (s *Service) Complete(ctx context.Context, userID, id, resultURL string) (Meme, error) {
-	if err := s.gate.CanCreate(ctx, userID); err != nil {
+	if err := s.gate.HasActiveSubscription(ctx, userID); err != nil {
 		return Meme{}, err
 	}
 	return s.repo.SetResultURL(ctx, id, userID, resultURL)

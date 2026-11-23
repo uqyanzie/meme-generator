@@ -104,3 +104,13 @@ Clicking **Bayar Sekarang (Simulasi)** on `/checkout/[reference]` previously swa
 - **Summary:** Subscribers could previously upload arbitrary, oversized, or malicious files (`.html`, `.exe`, `.zip`, 6 MiB+ blobs) directly into Garage S3 because `Service.PrepareUpload` never called `allowedExt`, trusted raw client `contentType`, and neither `PrepareUpload` nor `ResultUpload` validated `fileSize` or signed `ContentLength` into S3 presigned PUT URLs.
 - **Changes:** Enforced canonical extension allowlist (`.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`), exact extension-to-MIME matching, and a 5 MiB (`5 << 20`) file size cap on both `PrepareUpload` and `ResultUpload` (mapped to `400` / `30002` and `413` / `30003`, validated before DB insertion), signed both `ContentLength` and `ContentType` into Garage S3 presigned PUT URLs, and added matching client-side validation + `contentType`/`fileSize` payloads in `web/src/lib/queries.ts` and `web/src/app/studio/page.tsx`.
 - **Verification:** Added Go regression tests (`api/internal/modules/meme/handler_test.go`, `api/internal/modules/meme/service_test.go`), passed `go vet`, `go build`, `bun run check`, `bun run lint`, and verified live Before vs. After API + Garage S3 SigV4 tamper rejection (`docs/issues/TKT-108/evidence/after-api-repro.txt`).
+
+
+---
+
+## TKT-109: Quota Bypass via Concurrent Requests (Race Condition)
+
+- **Status:** Resolved
+- **Details:** [docs/issues/TKT-109/TKT-109-fix-report.md](docs/issues/TKT-109/TKT-109-fix-report.md)
+- **Summary:** Fixed the TOCTOU race condition in `PrepareUpload` by checking the user's active subscription and meme quota inside a PostgreSQL transaction with `FOR UPDATE OF s` atomically with `INSERT INTO memes`. Split `meme.Gate` so `ResultUpload` and `Complete` only verify an active subscription (`HasActiveSubscription`), unblocking completion of the final allowed meme.
+- **Verification:** `go vet ./...`, `go test ./...` (including `TestMemeQuota_ConcurrentPrepareUploadEnforcesLimit`, `TestMemeQuota_FinalAllowedMemeCanResultUploadAndComplete`, `TestMemeQuota_UnlimitedPlanAllowsBeyondStandardLimits`), `go build`, `bun run check`, `bun run lint`, and live API Before/After reproduction (`10/20` HTTP 201 on concurrent upload, `HTTP 200` on 10th meme `result-upload` & `complete`).
