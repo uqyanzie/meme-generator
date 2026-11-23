@@ -1,116 +1,159 @@
-# Fix Report — Meme Portal
+# Laporan Perbaikan — Meme Portal
 
-Consolidated engineering & non-engineer summary of resolved production issues (`TKT-101` – `TKT-109`).
-
----
-
-## TKT-103: Broken Logout Flow and Infinite Redirect Loop
-
-- **Status:** Resolved
-- **Detailed Report:** [docs/issues/TKT-103/TKT-103-fix-report.md](./docs/issues/TKT-103/TKT-103-fix-report.md)
-- **Layer:** Backend + Frontend
-
-### Summary
-Clicking **Keluar (Logout)** previously failed to delete auth cookies (wrong `Path=/api/v1/auth` instead of `/`), left access tokens valid until expiry, and left non-`HttpOnly` cookies readable by JavaScript. Combined with `/login` & `/register` redirecting on raw `document.cookie` presence and `/` redirecting unauthenticated users to `/login`, users were trapped in an infinite `/login` ↔ `/` redirect loop.
-
-### Solution
-- **Backend:** Set `HttpOnly: true` in `cookie.Set`; cleared both auth cookies on `Path: "/"` via `cookie.Clear`; added unique `jti` claims and a Redis access-token denylist (`auth:revoked:access:<jti>`) checked in `VerifyAccess(ctx, raw)`; removed `authMW` from `POST /api/v1/auth/logout` so logout is idempotent and always clears cookies.
-- **Frontend:** Removed the forced `/login` redirect from `/`; replaced `document.cookie` redirects in `/login` and `/register` with guarded `useMe()` checks; invalidated `["me"]` in `useRegister`; switched `useLogout` cleanup to `onSettled`.
-- **Verification:** Added Go regression tests (`cookie_test.go`, `jwt_test.go`, `handler_test.go`), passed `go vet`, `go test`, `go build`, `bun run check`, `bun run lint`, and verified live Before vs. After API behavior (`docs/issues/TKT-103/evidence/after-api-repro.txt`).
+Ringkasan terpadu untuk tim engineering maupun non-engineering terkait isu produksi yang telah diselesaikan (`TKT-101` – `TKT-109`).
 
 ---
 
-## TKT-102: Inconsistent Subscription Status and Cross-User Data Leakage
+## TKT-103: Alur Logout Rusak dan Infinite Redirect Loop
 
-- **Status:** Resolved
-- **Detailed Report:** [docs/issues/TKT-102/TKT-102-fix-report.md](./docs/issues/TKT-102/TKT-102-fix-report.md)
-- **Layer:** Backend
+- **Status:** Selesai
+- **Laporan Detail:** [docs/issues/TKT-103/TKT-103-fix-report.md](./docs/issues/TKT-103/TKT-103-fix-report.md)
+- **Lapisan:** Backend + Frontend
 
-### Summary
-`GET /api/v1/subscription/status` previously emitted `Cache-Control: public, max-age=86400` without varying on authentication credentials (`Vary: Origin` only). This allowed shared caches (office Wi-Fi proxies/CDNs) to leak one user's subscription status and quota to other users—including unauthenticated visitors—and caused users' browsers to serve stale pre-payment `"subscribed": false` responses from HTTP disk cache across tab reopens.
+### Ringkasan
+Mengklik **Keluar (Logout)** sebelumnya gagal menghapus cookie autentikasi (menggunakan `Path=/api/v1/auth` alih-alih `/`), membiarkan access token tetap valid hingga kedaluwarsa, dan membiarkan cookie non-`HttpOnly` dapat dibaca oleh JavaScript. Digabungkan dengan halaman `/login` & `/register` yang melakukan redirect berdasarkan keberadaan `document.cookie` mentah serta `/` yang mengalihkan pengguna yang belum terautentikasi ke `/login`, pengguna terjebak dalam infinite redirect loop `/login` ↔ `/`.
 
-### Solution
-- **Backend:** Removed the inline `Cache-Control: public, max-age=86400` wrapper from `GET /api/v1/subscription/status` in `api/internal/modules/subscription/mount.go`; enforced `Cache-Control: private, no-store` and appended `Vary: Cookie` and `Vary: Authorization` at the entry of `middleware.Auth` (`api/internal/middleware/auth.go`), protecting all authenticated endpoints (including `401` responses) while preserving `Vary: Origin` from `middleware.CORS` and leaving public routes untouched.
-- **Verification:** Added Go regression tests (`api/internal/middleware/auth_test.go`, `api/internal/modules/subscription/mount_test.go`), passed `go vet`, `go test`, `go build`, `bun run check`, `bun run lint`, and verified live Before vs. After API behavior (`docs/issues/TKT-102/evidence/after-api-repro.txt`).
-
-
----
-
-## TKT-104: Stale Subscription State in Navbar and Packages Page Until Hard Refresh
-
-- **Layer:** Frontend (`web/`)
-- **Status:** Resolved
-- **Fix Report:** [TKT-104-fix-report.md](./docs/issues/TKT-104/TKT-104-fix-report.md)
-- **Root Cause:** `useSubscriptionStatus` set `staleTime: Number.POSITIVE_INFINITY` and ran unconditionally even when logged out; `useLogin`, `useRegister`, `useCompleteMeme`, and `useDeleteMeme` did not invalidate `queryKeys.subscription`.
-- **Solution:** Extracted `queryKeys` into `web/src/lib/query-keys.ts`, configured `useSubscriptionStatus` with `staleTime: 0`, `refetchOnWindowFocus: true`, `retry: false`, and `enabled: Boolean(user)`, added `queryKeys.subscription` invalidation to auth and meme mutations, and guarded `/studio` with `me.isLoading || (me.data && status.isPending)`.
+### Solusi
+- **Backend:** Mengatur `HttpOnly: true` pada `cookie.Set`; menghapus kedua cookie autentikasi pada `Path: "/"` melalui `cookie.Clear`; menambahkan klaim `jti` unik serta denylist access token di Redis (`auth:revoked:access:<jti>`) yang diperiksa pada `VerifyAccess(ctx, raw)`; menghapus `authMW` dari `POST /api/v1/auth/logout` agar proses logout bersifat idempoten dan selalu menghapus cookie.
+- **Frontend:** Menghapus redirect paksa ke `/login` dari `/`; mengganti redirect berbasis `document.cookie` di `/login` dan `/register` dengan pengecekan `useMe()` yang aman; melakukan invalidasi `["me"]` pada `useRegister`; memindahkan pembersihan state pada `useLogout` ke `onSettled`.
+- **Verifikasi:** Menambahkan uji regresi Go (`cookie_test.go`, `jwt_test.go`, `handler_test.go`), lulus `go vet`, `go test`, `go build`, `bun run check`, `bun run lint`, serta memverifikasi perilaku API secara langsung Sebelum vs. Sesudah perbaikan (`docs/issues/TKT-103/evidence/after-api-repro.txt`).
 
 ---
 
-## TKT-101: Meme Creation Permitted After Subscription Expiration
+## TKT-102: Status Langganan Tidak Konsisten dan Kebocoran Data Antar-Pengguna
 
-- **Status:** Resolved
-- **Detailed Report:** [docs/issues/TKT-101/TKT-101-fix-report.md](./docs/issues/TKT-101/TKT-101-fix-report.md)
-- **Layer:** Backend
+- **Status:** Selesai
+- **Laporan Detail:** [docs/issues/TKT-102/TKT-102-fix-report.md](./docs/issues/TKT-102/TKT-102-fix-report.md)
+- **Lapisan:** Backend
 
-### Summary
-`Repository.ActiveByUser` previously queried `WHERE s.user_id = $1 AND s.status = 'active'` without checking `s.ends_at > now()`. Between expiration and the hourly `expireJanitor` (`MarkExpired`) run, expired subscriptions were still treated as active, permitting meme creation, reporting `subscribed: true`, and blocking renewal checkouts with `409 Conflict`.
+### Ringkasan
+`GET /api/v1/subscription/status` sebelumnya mengirimkan header `Cache-Control: public, max-age=86400` tanpa membedakan respons berdasarkan kredensial autentikasi (hanya `Vary: Origin`). Hal ini memungkinkan shared cache (seperti proxy Wi-Fi kantor/CDN) membocorkan status langganan dan kuota milik satu pengguna ke pengguna lain—termasuk pengunjung yang belum login—serta menyebabkan browser pengguna menyajikan respons usang `"subscribed": false` dari HTTP disk cache meskipun pengguna sudah membayar dan membuka ulang tab.
 
-### Solution
-- **Backend:** Added `AND s.ends_at > now()` to `Repository.ActiveByUser` in `api/internal/modules/subscription/repository.go`.
-- **Verification:** Added Go regression tests (`api/internal/modules/subscription/repository_test.go`, `api/internal/server/v1/v1_test.go`), passed `go vet`, `go test`, `go build`, `bun run check`, `bun run lint`, and verified live Before vs. After API behavior (`docs/issues/TKT-101/evidence/after-api-repro.txt`).
-
----
-
-## TKT-105: Duplicate Checkout / Double Billing Creation
-
-- **Status:** Resolved
-- **Detailed Report:** [docs/issues/TKT-105/TKT-105-fix-report.md](./docs/issues/TKT-105/TKT-105-fix-report.md)
-- **Root Cause:** `useCheckout()` generated a fresh `Idempotency-Key` per click, the Pricing UI did not disable in-flight submissions, `Service.Checkout` had a non-atomic idempotency check (causing `500` on concurrent identical keys) and no `(user_id, plan_id)` pending deduplication, and CORS preflight omitted `Idempotency-Key`.
-- **Solution:** Added per-plan `Idempotency-Key` reuse and `isBusy` button/navigation guards in `web/src/app/pricing/page.tsx` & `web/src/lib/queries.ts`; added `Idempotency-Key` to `Access-Control-Allow-Headers` in `api/internal/middleware/cors.go`; added partial unique index `subscriptions_user_plan_pending_idx` (`000006`), `PendingCheckoutByUserAndPlan`, and `SQLSTATE 23505` replay recovery in `api/internal/modules/subscription/`.
-- **Verification:** Added Go regression tests (`api/internal/middleware/cors_test.go`, `api/internal/modules/subscription/repository_test.go`), passed `go vet`, `go test -p 1`, `go build`, `bun run check`, `bun run lint`, and verified live Before vs. After API & browser behavior (`docs/issues/TKT-105/evidence/after-api-repro.txt`, `docs/issues/TKT-105/evidence/after-browser-repro.txt`).
+### Solusi
+- **Backend:** Menghapus pembungkus inline `Cache-Control: public, max-age=86400` dari `GET /api/v1/subscription/status` pada `api/internal/modules/subscription/mount.go`; menerapkan `Cache-Control: private, no-store` dan menambahkan `Vary: Cookie` serta `Vary: Authorization` di awal `middleware.Auth` (`api/internal/middleware/auth.go`), sehingga melindungi seluruh endpoint terautentikasi (termasuk respons `401`) sambil mempertahankan `Vary: Origin` dari `middleware.CORS` dan tidak memengaruhi rute publik.
+- **Verifikasi:** Menambahkan uji regresi Go (`api/internal/middleware/auth_test.go`, `api/internal/modules/subscription/mount_test.go`), lulus `go vet`, `go test`, `go build`, `bun run check`, `bun run lint`, serta memverifikasi perilaku API secara langsung Sebelum vs. Sesudah perbaikan (`docs/issues/TKT-102/evidence/after-api-repro.txt`).
 
 ---
 
-## TKT-106: Unresponsive "Pay Now" Button Without Feedback
+## TKT-104: Status Langganan Usang di Navbar dan Halaman Paket Hingga Hard Refresh
 
-- **Status:** Resolved
-- **Detailed Report:** [docs/issues/TKT-106/TKT-106-fix-report.md](./docs/issues/TKT-106/TKT-106-fix-report.md)
-- **Layer:** Frontend (+ Backend regression tests)
+- **Status:** Selesai
+- **Commit:** `263fdfd`
+- **Laporan Detail:** [docs/issues/TKT-104/TKT-104-fix-report.md](./docs/issues/TKT-104/TKT-104-fix-report.md)
+- **Lapisan:** Frontend
 
-### Summary
-Clicking **Bayar Sekarang (Simulasi)** on `/checkout/[reference]` previously swallowed all errors in an empty `catch {}`, had no `disabled` or loading state, and omitted `402` from `describeError`.
+### Ringkasan
+`useSubscriptionStatus` menetapkan `staleTime: Number.POSITIVE_INFINITY` dan tetap berjalan tanpa syarat meskipun pengguna sudah logout; selain itu, `useLogin`, `useRegister`, `useCompleteMeme`, dan `useDeleteMeme` tidak melakukan invalidasi terhadap `queryKeys.subscription`.
 
-### Solution
-- **Frontend:** Replaced `mutateAsync` + empty `catch {}` with `confirm.mutate` + `onSuccess` timer cleanup, added `disabled={confirm.isPending || Boolean(confirm.data)}` and `"Memproses..."` / `"Lunas"` states, rendered `role="alert"` error feedback via `describeError(confirm.error)`, and added `402: "Pembayaran tidak dapat diproses"` to `web/src/lib/errors.ts`.
-- **Verification:** Added 4 Go regression tests in `api/internal/modules/subscription/` (`repository_test.go`, `mount_test.go`), passed `go vet`, `go test`, `go build`, `bun run check`, `bun run lint`, and verified live `role="alert"` error rendering (`docs/issues/TKT-106/evidence/after-browser-repro.txt`).
-
----
-
-## TKT-107: Unauthorized Viewing and Deletion of Other Users' Memes (IDOR)
-
-- **Status:** Resolved
-- **Detailed Report:** [docs/issues/TKT-107/TKT-107-fix-report.md](./docs/issues/TKT-107/TKT-107-fix-report.md)
-- **Summary:** Any authenticated user could overwrite another user's meme result URL (`POST /api/v1/memes/{id}/complete`) or delete another user's meme (`DELETE /api/v1/memes/{id}`) because `Repository.GetByID`, `Repository.SetResultURL`, and `Repository.Delete` ignored `userID`. Additionally, `GetByID` selected 10 columns into 9 `Scan` arguments, breaking `POST /api/v1/memes/{id}/result-upload` with `500` for everyone.
-- **Changes:** Enforced `WHERE id = $1 AND user_id = $2` (and `$3` for `SetResultURL`) across all three repository methods, fixed the 9-column `GetByID` scan, mapped malformed UUIDs (`22P02`) to `404 Not Found`, and added best-effort Garage S3 object cleanup in `Service.Delete`.
-- **Verification:** Added Go regression tests (`api/internal/modules/meme/repository_test.go`, `api/internal/modules/meme/service_test.go`), passed `go vet`, `go test`, `go build`, `bun run check`, `bun run lint`, and verified live Before vs. After two-user API & S3 cleanup behavior (`docs/issues/TKT-107/evidence/after-api-repro.txt`).
+### Solusi
+- **Frontend:** Memisahkan `queryKeys` ke `web/src/lib/query-keys.ts`, mengonfigurasi `useSubscriptionStatus` dengan `staleTime: 0`, `refetchOnWindowFocus: true`, `retry: false`, dan `enabled: Boolean(user)`, menambahkan invalidasi `queryKeys.subscription` pada mutasi autentikasi dan meme, serta menambahkan guard pada `/studio` menggunakan `me.isLoading || (me.data && status.isPending)`.
+- **Verifikasi:** Menambahkan `web/src/lib/subscription-cache.test.ts` (5/5 lulus), lulus `bun run check`, `bun run lint`, serta memverifikasi state browser secara langsung Sebelum vs. Sesudah perbaikan (`docs/issues/TKT-104/evidence/after-browser-repro.txt`).
 
 ---
 
-## TKT-108: Arbitrary / Malicious File Uploads in S3 Storage
+## TKT-101: Pembuatan Meme Tetap Diizinkan Setelah Langganan Kedaluwarsa
 
-- **Status:** Resolved
-- **Detailed Report:** [docs/issues/TKT-108/TKT-108-fix-report.md](./docs/issues/TKT-108/TKT-108-fix-report.md)
-- **Layer:** Backend + Frontend
-- **Summary:** Subscribers could previously upload arbitrary, oversized, or malicious files (`.html`, `.exe`, `.zip`, 6 MiB+ blobs) directly into Garage S3 because `Service.PrepareUpload` never called `allowedExt`, trusted raw client `contentType`, and neither `PrepareUpload` nor `ResultUpload` validated `fileSize` or signed `ContentLength` into S3 presigned PUT URLs.
-- **Changes:** Enforced canonical extension allowlist (`.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`), exact extension-to-MIME matching, and a 5 MiB (`5 << 20`) file size cap on both `PrepareUpload` and `ResultUpload` (mapped to `400` / `30002` and `413` / `30003`, validated before DB insertion), signed both `ContentLength` and `ContentType` into Garage S3 presigned PUT URLs, and added matching client-side validation + `contentType`/`fileSize` payloads in `web/src/lib/queries.ts` and `web/src/app/studio/page.tsx`.
-- **Verification:** Added Go regression tests (`api/internal/modules/meme/handler_test.go`, `api/internal/modules/meme/service_test.go`), passed `go vet`, `go build`, `bun run check`, `bun run lint`, and verified live Before vs. After API + Garage S3 SigV4 tamper rejection (`docs/issues/TKT-108/evidence/after-api-repro.txt`).
+- **Status:** Selesai
+- **Laporan Detail:** [docs/issues/TKT-101/TKT-101-fix-report.md](./docs/issues/TKT-101/TKT-101-fix-report.md)
+- **Lapisan:** Backend
 
+### Ringkasan
+`Repository.ActiveByUser` sebelumnya menjalankan kueri `WHERE s.user_id = $1 AND s.status = 'active'` tanpa memeriksa `s.ends_at > now()`. Di antara waktu kedaluwarsa hingga eksekusi `expireJanitor` (`MarkExpired`) per jam berikutnya, langganan yang sudah berakhir masih dianggap aktif—sehingga pembuatan meme tetap diizinkan, API melaporkan `subscribed: true`, dan checkout perpanjangan terblokir dengan `409 Conflict`.
+
+### Solusi
+- **Backend:** Menambahkan kondisi `AND s.ends_at > now()` pada `Repository.ActiveByUser` di `api/internal/modules/subscription/repository.go`.
+- **Verifikasi:** Menambahkan uji regresi Go (`api/internal/modules/subscription/repository_test.go`, `api/internal/server/v1/v1_test.go`), lulus `go vet`, `go test`, `go build`, `bun run check`, `bun run lint`, serta memverifikasi perilaku API secara langsung Sebelum vs. Sesudah perbaikan (`docs/issues/TKT-101/evidence/after-api-repro.txt`).
 
 ---
 
-## TKT-109: Quota Bypass via Concurrent Requests (Race Condition)
+## TKT-105: Duplikasi Checkout / Pembuatan Tagihan Ganda
 
-- **Status:** Resolved
-- **Details:** [docs/issues/TKT-109/TKT-109-fix-report.md](docs/issues/TKT-109/TKT-109-fix-report.md)
-- **Summary:** Fixed the TOCTOU race condition in `PrepareUpload` by checking the user's active subscription and meme quota inside a PostgreSQL transaction with `FOR UPDATE OF s` atomically with `INSERT INTO memes`. Split `meme.Gate` so `ResultUpload` and `Complete` only verify an active subscription (`HasActiveSubscription`), unblocking completion of the final allowed meme.
-- **Verification:** `go vet ./...`, `go test ./...` (including `TestMemeQuota_ConcurrentPrepareUploadEnforcesLimit`, `TestMemeQuota_FinalAllowedMemeCanResultUploadAndComplete`, `TestMemeQuota_UnlimitedPlanAllowsBeyondStandardLimits`), `go build`, `bun run check`, `bun run lint`, and live API Before/After reproduction (`10/20` HTTP 201 on concurrent upload, `HTTP 200` on 10th meme `result-upload` & `complete`).
+- **Status:** Selesai
+- **Laporan Detail:** [docs/issues/TKT-105/TKT-105-fix-report.md](./docs/issues/TKT-105/TKT-105-fix-report.md)
+- **Lapisan:** Backend + Frontend
+
+### Ringkasan
+`useCheckout()` menghasilkan `Idempotency-Key` baru pada setiap klik, antarmuka halaman Pricing tidak menonaktifkan pengiriman yang sedang berlangsung, `Service.Checkout` melakukan pengecekan idempotensi secara non-atomik (menyebabkan `500` saat key yang sama dikirim bersamaan) serta tidak memiliki deduplikasi tagihan `pending` per `(user_id, plan_id)`, dan CORS preflight belum menyertakan `Idempotency-Key`.
+
+### Solusi
+- **Frontend:** Menambahkan penggunaan ulang `Idempotency-Key` per paket serta guard tombol/navigasi `isBusy` pada `web/src/app/pricing/page.tsx` & `web/src/lib/queries.ts`.
+- **Backend:** Menambahkan `Idempotency-Key` ke `Access-Control-Allow-Headers` pada `api/internal/middleware/cors.go`; menambahkan partial unique index `subscriptions_user_plan_pending_idx` (`000006`), metode `PendingCheckoutByUserAndPlan`, serta pemulihan replay `SQLSTATE 23505` di `api/internal/modules/subscription/`.
+- **Verifikasi:** Menambahkan uji regresi Go (`api/internal/middleware/cors_test.go`, `api/internal/modules/subscription/repository_test.go`), lulus `go vet`, `go test -p 1`, `go build`, `bun run check`, `bun run lint`, serta memverifikasi perilaku API & browser secara langsung Sebelum vs. Sesudah perbaikan (`docs/issues/TKT-105/evidence/after-api-repro.txt`, `docs/issues/TKT-105/evidence/after-browser-repro.txt`).
+
+---
+
+## TKT-106: Tombol "Bayar Sekarang" Tidak Responsif Tanpa Umpan Balik
+
+- **Status:** Selesai
+- **Laporan Detail:** [docs/issues/TKT-106/TKT-106-fix-report.md](./docs/issues/TKT-106/TKT-106-fix-report.md)
+- **Lapisan:** Frontend (+ Uji Regresi Backend)
+
+### Ringkasan
+Mengklik **Bayar Sekarang (Simulasi)** pada `/checkout/[reference]` sebelumnya menelan seluruh error dalam blok `catch {}` kosong, tidak memiliki state `disabled` maupun indikator pemuatan, dan belum mencantumkan kode status `402` di `describeError`.
+
+### Solusi
+- **Frontend:** Mengganti `mutateAsync` + `catch {}` kosong dengan `confirm.mutate` + pembersihan timer pada `onSuccess`, menambahkan `disabled={confirm.isPending || Boolean(confirm.data)}` beserta status `"Memproses..."` / `"Lunas"`, menampilkan umpan balik error `role="alert"` melalui `describeError(confirm.error)`, dan menambahkan `402: "Pembayaran tidak dapat diproses"` di `web/src/lib/errors.ts`.
+- **Verifikasi:** Menambahkan 4 uji regresi Go di `api/internal/modules/subscription/` (`repository_test.go`, `mount_test.go`), lulus `go vet`, `go test`, `go build`, `bun run check`, `bun run lint`, serta memverifikasi tampilan error `role="alert"` secara langsung (`docs/issues/TKT-106/evidence/after-browser-repro.txt`).
+
+---
+
+## TKT-107: Akses dan Penghapusan Meme Milik Pengguna Lain Secara Tidak Sah (IDOR)
+
+- **Status:** Selesai
+- **Laporan Detail:** [docs/issues/TKT-107/TKT-107-fix-report.md](./docs/issues/TKT-107/TKT-107-fix-report.md)
+- **Lapisan:** Backend
+
+### Ringkasan
+Pengguna terautentikasi mana pun sebelumnya dapat menimpa URL hasil meme milik pengguna lain (`POST /api/v1/memes/{id}/complete`) atau menghapus meme milik pengguna lain (`DELETE /api/v1/memes/{id}`) karena `Repository.GetByID`, `Repository.SetResultURL`, dan `Repository.Delete` mengabaikan `userID`. Selain itu, `GetByID` memilih 10 kolom ke dalam 9 argumen `Scan`, sehingga mematahkan `POST /api/v1/memes/{id}/result-upload` dengan error `500` untuk semua pengguna.
+
+### Solusi
+- **Backend:** Menerapkan `WHERE id = $1 AND user_id = $2` (serta `$3` untuk `SetResultURL`) di ketiga metode repositori, memperbaiki `Scan` 9 kolom pada `GetByID`, memetakan UUID yang tidak valid (`22P02`) ke `404 Not Found`, dan menambahkan pembersihan objek Garage S3 secara best-effort di `Service.Delete`.
+- **Verifikasi:** Menambahkan uji regresi Go (`api/internal/modules/meme/repository_test.go`, `api/internal/modules/meme/service_test.go`), lulus `go vet`, `go test`, `go build`, `bun run check`, `bun run lint`, serta memverifikasi perilaku API dua pengguna dan pembersihan S3 secara langsung Sebelum vs. Sesudah perbaikan (`docs/issues/TKT-107/evidence/after-api-repro.txt`).
+
+---
+
+## TKT-108: Unggahan File Sembarang / Berbahaya ke Penyimpanan S3
+
+- **Status:** Selesai
+- **Laporan Detail:** [docs/issues/TKT-108/TKT-108-fix-report.md](./docs/issues/TKT-108/TKT-108-fix-report.md)
+- **Lapisan:** Backend + Frontend
+
+### Ringkasan
+Pelanggan sebelumnya dapat mengunggah file sembarang, berukuran berlebih, atau berbahaya (`.html`, `.exe`, `.zip`, blob 6 MiB+) langsung ke Garage S3 karena `Service.PrepareUpload` tidak pernah memanggil `allowedExt`, memercayai `contentType` mentah dari klien, dan baik `PrepareUpload` maupun `ResultUpload` tidak memvalidasi `fileSize` ataupun menandatangani `ContentLength` ke dalam presigned PUT URL S3.
+
+### Solusi
+- **Backend:** Menerapkan daftar izin ekstensi kanonis (`.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`), pencocokan ketat ekstensi-ke-MIME, dan batas ukuran file 5 MiB (`5 << 20`) pada `PrepareUpload` maupun `ResultUpload` (dipetakan ke `400` / `30002` dan `413` / `30003`, divalidasi sebelum insert DB), serta menandatangani `ContentLength` dan `ContentType` ke dalam presigned PUT URL Garage S3.
+- **Frontend:** Menambahkan validasi sisi klien yang selaras serta payload `contentType`/`fileSize` pada `web/src/lib/queries.ts` dan `web/src/app/studio/page.tsx`.
+- **Verifikasi:** Menambahkan uji regresi Go (`api/internal/modules/meme/handler_test.go`, `api/internal/modules/meme/service_test.go`), lulus `go vet`, `go build`, `bun run check`, `bun run lint`, serta memverifikasi perilaku API dan penolakan manipulasi SigV4 Garage S3 secara langsung Sebelum vs. Sesudah perbaikan (`docs/issues/TKT-108/evidence/after-api-repro.txt`).
+
+---
+
+## TKT-109: Pelampauan Kuota Melalui Permintaan Bersamaan (Race Condition)
+
+- **Status:** Selesai
+- **Commit:** `2c63732`
+- **Laporan Detail:** [docs/issues/TKT-109/TKT-109-fix-report.md](./docs/issues/TKT-109/TKT-109-fix-report.md)
+- **Lapisan:** Backend
+
+### Ringkasan
+Permintaan `PrepareUpload` yang dikirim bersamaan sebelumnya dapat melampaui kuota meme per paket akibat race condition TOCTOU antara pengecekan langganan aktif/kuota dengan penyisipan baris meme, serta `ResultUpload`/`Complete` terblokir pada meme terakhir yang diizinkan.
+
+### Solusi
+- **Backend:** Memeriksa langganan aktif dan kuota meme pengguna di dalam transaksi PostgreSQL menggunakan `FOR UPDATE OF s` secara atomik bersama `INSERT INTO memes` pada `PrepareUpload`; memisahkan `meme.Gate` agar `ResultUpload` dan `Complete` hanya memverifikasi langganan aktif (`HasActiveSubscription`).
+- **Verifikasi:** Lulus `go vet ./...`, `go test ./...` (termasuk `TestMemeQuota_ConcurrentPrepareUploadEnforcesLimit`, `TestMemeQuota_FinalAllowedMemeCanResultUploadAndComplete`, `TestMemeQuota_UnlimitedPlanAllowsBeyondStandardLimits`), `go build`, `bun run check`, `bun run lint`, serta reproduksi API langsung Sebelum/Sesudah (`10/20` HTTP 201 pada unggahan bersamaan, `HTTP 200` pada `result-upload` & `complete` untuk meme ke-10).
+
+---
+
+## Verifikasi Terintegrasi Akhir
+
+Diverifikasi pada `HEAD` terintegrasi (`2c63732`) — keluaran lengkap tercatat di [docs/verification/automated-suite.txt](./docs/verification/automated-suite.txt):
+
+- **Backend (`api/`):**
+  - `go vet ./...` — lulus
+  - `go test -count=1 ./...` — lulus (`middleware`, `auth`, `meme`, `subscription`, `cookie`, `token`, `v1`)
+  - `go build -o bin/api ./cmd/server` — lulus
+- **Frontend (`web/`):**
+  - `bun test` — lulus (5/5 pada `src/lib/subscription-cache.test.ts`)
+  - `bun run check` (`tsc --noEmit`) — lulus
+  - `bun run lint` (`next lint`) — lulus (1 peringatan `unused-var` bawaan pada `formatIdr` di `src/app/checkout/[reference]/page.tsx`)
+  - `bun run build` (`next build`) — lulus (seluruh 7 rute berhasil dikompilasi dan dibangun)

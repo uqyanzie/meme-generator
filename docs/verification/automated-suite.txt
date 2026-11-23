@@ -1,0 +1,123 @@
+=== AUTOMATED VERIFICATION SUITE ===
+Date: 2026-11-24 02:01:26 +07:00
+HEAD: 2c63732
+
+--- BACKEND: go vet ./... ---
+
+--- BACKEND: go test -count=1 ./... ---
+?   	github.com/nyxsr/meme-portal/api/cmd/server	[no test files]
+?   	github.com/nyxsr/meme-portal/api/internal/app	[no test files]
+?   	github.com/nyxsr/meme-portal/api/internal/config	[no test files]
+?   	github.com/nyxsr/meme-portal/api/internal/db	[no test files]
+ok  	github.com/nyxsr/meme-portal/api/internal/middleware	2.138s
+ok  	github.com/nyxsr/meme-portal/api/internal/modules/auth	2.624s
+ok  	github.com/nyxsr/meme-portal/api/internal/modules/meme	1.119s
+ok  	github.com/nyxsr/meme-portal/api/internal/modules/subscription	1.364s
+?   	github.com/nyxsr/meme-portal/api/internal/platform/cache	[no test files]
+ok  	github.com/nyxsr/meme-portal/api/internal/platform/cookie	1.220s
+?   	github.com/nyxsr/meme-portal/api/internal/platform/database	[no test files]
+?   	github.com/nyxsr/meme-portal/api/internal/platform/logger	[no test files]
+?   	github.com/nyxsr/meme-portal/api/internal/platform/storage	[no test files]
+ok  	github.com/nyxsr/meme-portal/api/internal/platform/token	1.878s
+?   	github.com/nyxsr/meme-portal/api/internal/response	[no test files]
+?   	github.com/nyxsr/meme-portal/api/internal/server	[no test files]
+ok  	github.com/nyxsr/meme-portal/api/internal/server/v1	1.257s
+
+--- BACKEND: go build -o bin/api ./cmd/server ---
+
+--- FRONTEND: bun test ---
+bun test v1.3.14 (0d9b296a)
+bun : 
+At line:1 char:1089
++ ... RONTEND: bun test ---" | Add-Content "../$log"; bun test 2>&1 | Tee-O ...
++                                                     ~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+src\lib\subscription-cache.test.ts:
+(pass) TKT-104 subscription cache & invalidation > subscriptionStatusQueryOptions(false) disables unauthenticated 
+polling and uses staleTime: 0 [1.05ms]
+(pass) TKT-104 subscription cache & invalidation > subscriptionStatusQueryOptions(true) enables authenticated polling 
+with staleTime: 0 [0.08ms]
+(pass) TKT-104 subscription cache & invalidation > invalidateAuthQueries invalidates me, subscription, and memes 
+[4.44ms]
+(pass) TKT-104 subscription cache & invalidation > invalidateSubscriptionQuery invalidates subscription [0.44ms]
+(pass) TKT-104 subscription cache & invalidation > invalidateMemeQueries invalidates both memes and subscription 
+[0.68ms]
+
+ 5 pass
+ 0 fail
+Ran 5 tests across 1 file. [640.00ms]
+
+--- FRONTEND: bun run check ---
+bun : $ tsc --noEmit
+At line:1 char:1255
++ ... un run check ---" | Add-Content "../$log"; bun run check 2>&1 | Tee-O ...
++                                                ~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ($ tsc --noEmit:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+
+--- FRONTEND: bun run lint ---
+bun : $ next lint
+At line:1 char:1425
++ ...  bun run lint ---" | Add-Content "../$log"; bun run lint 2>&1 | Tee-O ...
++                                                 ~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ($ next lint:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+`next lint` is deprecated and will be removed in Next.js 16.
+For new projects, use create-next-app to choose your preferred linter.
+For existing projects, migrate to the ESLint CLI:
+npx @next/codemod@canary next-lint-to-eslint-cli .
+
+
+./src/app/checkout/[reference]/page.tsx
+22:10  Warning: 'formatIdr' is defined but never used.  @typescript-eslint/no-unused-vars
+
+info  - Need to disable some ESLint rules? Learn more here: https://nextjs.org/docs/app/api-reference/config/eslint#disabling-rules
+
+--- FRONTEND: bun run build ---
+bun : $ next build
+At line:1 char:1595
++ ... bun run build ---" | Add-Content "../$log"; bun run build 2>&1 | Tee-O ...
++                                                ~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ($ next build:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+   % Next.js 15.5.29
+
+   Creating an optimized production build ...
+ ' Compiled successfully in 28.1s
+   Linting and checking validity of types ...
+
+./src/app/checkout/[reference]/page.tsx
+22:10  Warning: 'formatIdr' is defined but never used.  @typescript-eslint/no-unused-vars
+
+info  - Need to disable some ESLint rules? Learn more here: https://nextjs.org/docs/app/api-reference/config/eslint#disabling-rules
+   Collecting page data ...
+   Generating static pages (0/8) ...
+   Generating static pages (2/8) 
+   Generating static pages (4/8) 
+   Generating static pages (6/8) 
+ ' Generating static pages (8/8)
+   Finalizing page optimization ...
+   Collecting build traces ...
+
+Route (app)                                 Size  First Load JS
+% % /                                      162 B         106 kB
+% % /_not-found                            990 B         104 kB
+%  /checkout/[reference]                3.39 kB         148 kB
+% % /login                               2.68 kB         164 kB
+% % /pricing                             3.49 kB         144 kB
+% % /register                            2.71 kB         164 kB
+% % /studio                               5.8 kB         150 kB
++ First Load JS shared by all             103 kB
+  % chunks/255-73938ce8a8eac1ad.js       46.6 kB
+  % chunks/4bd1b696-c023c6e3521b1417.js  54.2 kB
+  % other shared chunks (total)          1.99 kB
+
+
+%  (Static)   prerendered as static content
+  (Dynamic)  server-rendered on demand
+
