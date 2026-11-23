@@ -6,6 +6,7 @@
 
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
+import { useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -15,6 +16,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { describeError } from "@/lib/errors";
 import { useConfirmPayment } from "@/lib/queries";
 
 function formatIdr(n: number) {
@@ -29,14 +31,25 @@ export default function CheckoutPage() {
   const { reference } = useParams<{ reference: string }>();
   const router = useRouter();
   const confirm = useConfirmPayment();
+  const redirectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const onPay = async () => {
-    try {
-      await confirm.mutateAsync(reference);
-      setTimeout(() => router.push("/pricing"), 1200);
-    } catch {
-      // BUG: error sengaja ditelan — gagal bayar tidak menampilkan apa-apa.
-    }
+  useEffect(() => {
+    return () => {
+      if (redirectTimerRef.current) {
+        clearTimeout(redirectTimerRef.current);
+      }
+    };
+  }, []);
+
+  const onPay = () => {
+    if (confirm.isPending || confirm.data) return;
+    confirm.mutate(reference, {
+      onSuccess: () => {
+        redirectTimerRef.current = setTimeout(() => {
+          router.push("/pricing");
+        }, 1200);
+      },
+    });
   };
 
   return (
@@ -58,10 +71,27 @@ export default function CheckoutPage() {
               ✅ Pembayaran berhasil! Langganan Anda aktif. Mengalihkan…
             </p>
           ) : null}
+          {confirm.isError ? (
+            <p
+              role="alert"
+              className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+            >
+              {describeError(confirm.error)}
+            </p>
+          ) : null}
         </CardContent>
         <CardFooter className="flex gap-2">
-          <Button className="flex-1" onClick={onPay}>
-            {confirm.data ? "Lunas" : "Bayar Sekarang (Simulasi)"}
+          <Button
+            className="flex-1"
+            disabled={confirm.isPending || Boolean(confirm.data)}
+            aria-busy={confirm.isPending}
+            onClick={onPay}
+          >
+            {confirm.data
+              ? "Lunas"
+              : confirm.isPending
+                ? "Memproses..."
+                : "Bayar Sekarang (Simulasi)"}
           </Button>
           <Button asChild variant="ghost">
             <Link href="/pricing">Batal</Link>

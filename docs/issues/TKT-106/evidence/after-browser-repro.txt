@@ -1,0 +1,25 @@
+TKT-106 "After" Browser Reproduction Evidence
+Date: 2026-11-23
+Target URL: http://localhost:3000/checkout/nonexistent-ref-tkt106
+Environment: Next.js dev server on :3000 (API on :8080 stopped to simulate failed confirm request)
+
+=== 1. Action: Click "Bayar Sekarang (Simulasi)" ===
+Clicked "Bayar Sekarang (Simulasi)" on http://localhost:3000/checkout/nonexistent-ref-tkt106.
+
+=== 2. Final DOM State (after request failed) ===
+Full <main> snapshot:
+  uid=21_13 main
+    uid=21_14 "Simulasi Pembayaran"
+    uid=21_15 "Payment gateway mock — tidak ada uang sungguhan."
+    uid=21_16 "Referensi"
+    uid=21_17 "nonexistent-ref-tkt106"
+    uid=22_0 alert atomic live="assertive" relevant="additions text"
+      uid=22_1 "Tidak bisa terhubung ke server API — pastikan backend berjalan"
+    uid=21_18 button "Bayar Sekarang (Simulasi)"
+    uid=21_19 link "Batal" url="http://localhost:3000/pricing"
+
+=== 3. Observed Fix Behavior ===
+- Inline error alert rendered with role="alert":
+  "Tidak bisa terhubung ke server API — pastikan backend berjalan"
+- Button re-enabled for retry ("Bayar Sekarang (Simulasi)") alongside the "Batal" link to /pricing.
+- During in-flight/success states, button is disabled via `disabled={confirm.isPending || Boolean(confirm.data)}` with `aria-busy={confirm.isPending}` and labels `"Memproses..."` / `"Lunas"`.

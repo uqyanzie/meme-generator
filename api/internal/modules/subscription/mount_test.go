@@ -2,6 +2,7 @@ package subscription_test
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -161,5 +162,46 @@ func TestRegisterRoutes_PlansPublic_NotProtectedAndNoBuggyPublicMaxAge(t *testin
 	vary := varyTokens(rec.Header())
 	if !vary["origin"] {
 		t.Errorf("Vary %v missing Origin", rec.Header().Values("Vary"))
+	}
+}
+
+func TestRegisterRoutes_ConfirmPayment_HTTPStatusCodes(t *testing.T) {
+	pool := newTestPool(t)
+	userID := seedTestUser(t, pool)
+	repo := subscription.NewPostgresRepository(pool)
+	svc := subscription.NewService(repo, subscription.MockGateway{})
+
+	checkout, err := svc.Checkout(context.Background(), userID, subscription.CheckoutDTO{PlanCode: "premium_1d"}, fmt.Sprintf("tkt106-http-%d", time.Now().UnixNano()))
+	if err != nil {
+		t.Fatalf("checkout failed: %v", err)
+	}
+
+	tokens := token.NewManager("test-secret-tkt106", "meme-portal", 15*time.Minute, time.Hour, nil)
+	appHandler := setupSubscriptionApp(pool, tokens)
+
+	confirmURL := "/api/v1/subscription/payments/" + checkout.Payment.Reference + "/confirm"
+
+	// First confirm -> 200 OK
+	req1 := httptest.NewRequest(http.MethodPost, confirmURL, nil)
+	rec1 := httptest.NewRecorder()
+	appHandler.ServeHTTP(rec1, req1)
+	if rec1.Code != http.StatusOK {
+		t.Fatalf("first confirm status = %d, want %d (body: %s)", rec1.Code, http.StatusOK, rec1.Body.String())
+	}
+
+	// Duplicate confirm -> 402 Payment Required
+	req2 := httptest.NewRequest(http.MethodPost, confirmURL, nil)
+	rec2 := httptest.NewRecorder()
+	appHandler.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusPaymentRequired {
+		t.Fatalf("duplicate confirm status = %d, want %d (body: %s)", rec2.Code, http.StatusPaymentRequired, rec2.Body.String())
+	}
+
+	// Unknown reference -> 402 Payment Required
+	req3 := httptest.NewRequest(http.MethodPost, "/api/v1/subscription/payments/unknown-ref-tkt106/confirm", nil)
+	rec3 := httptest.NewRecorder()
+	appHandler.ServeHTTP(rec3, req3)
+	if rec3.Code != http.StatusPaymentRequired {
+		t.Fatalf("unknown ref confirm status = %d, want %d (body: %s)", rec3.Code, http.StatusPaymentRequired, rec3.Body.String())
 	}
 }

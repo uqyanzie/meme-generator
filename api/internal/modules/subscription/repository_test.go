@@ -227,3 +227,93 @@ func TestCheckout_AllowsDifferentPlanWhilePendingExists(t *testing.T) {
 		t.Fatalf("expected distinct checkouts for different plans, got same (%s, %s)", res1.Subscription.ID, res1.Payment.Reference)
 	}
 }
+
+
+func TestConfirmPayment_ActivatesSubscriptionAndRejectsDoubleConfirm(t *testing.T) {
+	pool := newTestPool(t)
+	userID := seedTestUser(t, pool)
+	repo := subscription.NewPostgresRepository(pool)
+	svc := subscription.NewService(repo, subscription.MockGateway{})
+
+	checkout, err := svc.Checkout(context.Background(), userID, subscription.CheckoutDTO{PlanCode: "premium_1d"}, fmt.Sprintf("tkt106-confirm-%d", time.Now().UnixNano()))
+	if err != nil {
+		t.Fatalf("checkout failed: %v", err)
+	}
+
+	if _, _, err := svc.Confirm(context.Background(), checkout.Payment.Reference); err != nil {
+		t.Fatalf("first Confirm failed: %v", err)
+	}
+
+	var payStatus string
+	if err := pool.QueryRow(context.Background(), `SELECT status FROM payments WHERE reference = $1`, checkout.Payment.Reference).Scan(&payStatus); err != nil {
+		t.Fatalf("query payment status: %v", err)
+	}
+	if payStatus != "paid" {
+		t.Fatalf("payment status = %q, want %q", payStatus, "paid")
+	}
+
+	active, _, err := repo.ActiveByUser(context.Background(), userID)
+	if err != nil {
+		t.Fatalf("ActiveByUser failed: %v", err)
+	}
+	if active.Status != "active" || active.StartsAt == nil || active.EndsAt == nil {
+		t.Fatalf("expected active subscription with starts_at and ends_at, got %+v", active)
+	}
+
+	_, _, err = svc.Confirm(context.Background(), checkout.Payment.Reference)
+	if !errors.Is(err, subscription.ErrPaymentFailed) {
+		t.Fatalf("second Confirm err = %v, want ErrPaymentFailed", err)
+	}
+}
+
+func TestConfirmPayment_RejectsUnknownReference(t *testing.T) {
+	pool := newTestPool(t)
+	repo := subscription.NewPostgresRepository(pool)
+	svc := subscription.NewService(repo, subscription.MockGateway{})
+
+	_, _, err := svc.Confirm(context.Background(), fmt.Sprintf("unknown-ref-%d", time.Now().UnixNano()))
+	if !errors.Is(err, subscription.ErrPaymentFailed) {
+		t.Fatalf("Confirm(unknown) err = %v, want ErrPaymentFailed", err)
+	}
+}
+
+func TestConfirmPayment_ConcurrentConfirms_OnlyOneSucceeds(t *testing.T) {
+	pool := newTestPool(t)
+	userID := seedTestUser(t, pool)
+	repo := subscription.NewPostgresRepository(pool)
+	svc := subscription.NewService(repo, subscription.MockGateway{})
+
+	checkout, err := svc.Checkout(context.Background(), userID, subscription.CheckoutDTO{PlanCode: "premium_1d"}, fmt.Sprintf("tkt106-race-%d", time.Now().UnixNano()))
+	if err != nil {
+		t.Fatalf("checkout failed: %v", err)
+	}
+
+	const n = 10
+	errs := make(chan error, n)
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func() {
+			defer wg.Done()
+			_, _, err := svc.Confirm(context.Background(), checkout.Payment.Reference)
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+
+	var succeeded, failed int
+	for err := range errs {
+		switch {
+		case err == nil:
+			succeeded++
+		case errors.Is(err, subscription.ErrPaymentFailed):
+			failed++
+		default:
+			t.Fatalf("unexpected error: %v", err)
+		}
+	}
+	if succeeded != 1 || failed != n-1 {
+		t.Fatalf("expected 1 success and %d ErrPaymentFailed, got %d success and %d failed", n-1, succeeded, failed)
+	}
+}

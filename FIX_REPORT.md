@@ -68,3 +68,18 @@ Clicking **Keluar (Logout)** previously failed to delete auth cookies (wrong `Pa
 - **Root Cause:** `useCheckout()` generated a fresh `Idempotency-Key` per click, the Pricing UI did not disable in-flight submissions, `Service.Checkout` had a non-atomic idempotency check (causing `500` on concurrent identical keys) and no `(user_id, plan_id)` pending deduplication, and CORS preflight omitted `Idempotency-Key`.
 - **Solution:** Added per-plan `Idempotency-Key` reuse and `isBusy` button/navigation guards in `web/src/app/pricing/page.tsx` & `web/src/lib/queries.ts`; added `Idempotency-Key` to `Access-Control-Allow-Headers` in `api/internal/middleware/cors.go`; added partial unique index `subscriptions_user_plan_pending_idx` (`000006`), `PendingCheckoutByUserAndPlan`, and `SQLSTATE 23505` replay recovery in `api/internal/modules/subscription/`.
 - **Verification:** Added Go regression tests (`api/internal/middleware/cors_test.go`, `api/internal/modules/subscription/repository_test.go`), passed `go vet`, `go test -p 1`, `go build`, `bun run check`, `bun run lint`, and verified live Before vs. After API & browser behavior (`docs/issues/TKT-105/evidence/after-api-repro.txt`, `docs/issues/TKT-105/evidence/after-browser-repro.txt`).
+
+---
+
+## TKT-106: Unresponsive "Pay Now" Button Without Feedback
+
+- **Status:** Resolved
+- **Detailed Report:** [docs/issues/TKT-106/TKT-106-fix-report.md](./docs/issues/TKT-106/TKT-106-fix-report.md)
+- **Layer:** Frontend (+ Backend regression tests)
+
+### Summary
+Clicking **Bayar Sekarang (Simulasi)** on `/checkout/[reference]` previously swallowed all errors in an empty `catch {}`, had no `disabled` or loading state, and omitted `402` from `describeError`.
+
+### Solution
+- **Frontend:** Replaced `mutateAsync` + empty `catch {}` with `confirm.mutate` + `onSuccess` timer cleanup, added `disabled={confirm.isPending || Boolean(confirm.data)}` and `"Memproses..."` / `"Lunas"` states, rendered `role="alert"` error feedback via `describeError(confirm.error)`, and added `402: "Pembayaran tidak dapat diproses"` to `web/src/lib/errors.ts`.
+- **Verification:** Added 4 Go regression tests in `api/internal/modules/subscription/` (`repository_test.go`, `mount_test.go`), passed `go vet`, `go test`, `go build`, `bun run check`, `bun run lint`, and verified live `role="alert"` error rendering (`docs/issues/TKT-106/evidence/after-browser-repro.txt`).

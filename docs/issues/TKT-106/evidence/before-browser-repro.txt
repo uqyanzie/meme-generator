@@ -1,0 +1,50 @@
+TKT-106 "Before" Browser Reproduction Evidence
+Date: 2026-11-23
+Target URL: http://localhost:3000/checkout/nonexistent-ref-tkt106
+Environment: Next.js dev server on :3000 (API on :8080 stopped to simulate failed confirm request)
+
+=== 1. Initial DOM State (before clicking) ===
+URL: http://localhost:3000/checkout/nonexistent-ref-tkt106
+Exact visible text in <main>:
+  Simulasi Pembayaran
+  Payment gateway mock — tidak ada uang sungguhan.
+  Referensi
+  nonexistent-ref-tkt106
+  Bayar Sekarang (Simulasi)
+  Batal
+
+Interactive controls in <main>:
+  - <button> "Bayar Sekarang (Simulasi)"
+    hasAttribute('disabled'): false
+    getAttribute('disabled'): null
+    .disabled: false
+  - <a href="/pricing"> "Batal"
+
+=== 2. Action: 3 Rapid Clicks on "Bayar Sekarang (Simulasi)" ===
+Clicked "Bayar Sekarang (Simulasi)" 3 times in quick succession (~100ms apart).
+Result: All 3 clicks executed on the enabled button. Button did not disable, did not show a loading indicator, and did not change label.
+
+=== 3. Final DOM State (>2s after clicks) ===
+URL: http://localhost:3000/checkout/nonexistent-ref-tkt106 (no navigation)
+Visible text in <main> (completely unchanged):
+  Simulasi Pembayaran
+  Payment gateway mock — tidak ada uang sungguhan.
+  Referensi
+  nonexistent-ref-tkt106
+  Bayar Sekarang (Simulasi)  [still enabled, not disabled]
+  Batal                      [href="/pricing"]
+
+Visible alert/error/success elements in <main>:
+  NONE (no error banner, no success message, no loading state).
+
+=== 4. Network Requests to /confirm ===
+All 3 rapid clicks fired duplicate POST requests:
+  reqid=18 POST http://localhost:8080/api/v1/subscription/payments/nonexistent-ref-tkt106/confirm [net::ERR_CONNECTION_REFUSED]
+  reqid=19 POST http://localhost:8080/api/v1/subscription/payments/nonexistent-ref-tkt106/confirm [net::ERR_CONNECTION_REFUSED]
+  reqid=20 POST http://localhost:8080/api/v1/subscription/payments/nonexistent-ref-tkt106/confirm [net::ERR_CONNECTION_REFUSED]
+
+(Initial page load also fired: reqid=15 GET http://localhost:8080/api/v1/auth/me [net::ERR_CONNECTION_REFUSED])
+
+=== 5. Console Messages ===
+  [error] Failed to load resource: net::ERR_CONNECTION_REFUSED [4 times] (1x /auth/me + 3x /confirm)
+  No unhandled rejection or UI error message surfaced to the user (swallowed by empty catch {} in onPay).
