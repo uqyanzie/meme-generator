@@ -15,7 +15,14 @@ func NewPostgres(ctx context.Context, cfg config.DBConfig) (*pgxpool.Pool, error
 		"postgres://%s:%s@%s:%d/%s?sslmode=%s",
 		cfg.User, cfg.Password, cfg.Host, cfg.Port, cfg.Name, cfg.SSLMode,
 	)
-	pool, err := pgxpool.New(ctx, dsn)
+	poolCfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		return nil, fmt.Errorf("database: gagal parse config pool: %w", err)
+	}
+	poolCfg.MaxConns = 25
+	poolCfg.MinConns = 4
+
+	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
 		return nil, fmt.Errorf("database: gagal membuat pool: %w", err)
 	}

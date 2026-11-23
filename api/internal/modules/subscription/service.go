@@ -2,6 +2,7 @@ package subscription
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -91,12 +92,8 @@ func (s *Service) MarkExpired(ctx context.Context) (int64, error) {
 }
 
 func (s *Service) Status(ctx context.Context, userID string) (SubscriptionStatus, error) {
-	sub, plan, err := s.repo.ActiveByUser(ctx, userID)
+	sub, plan, used, err := s.repo.ActiveStatusByUser(ctx, userID)
 	if err == nil {
-		used, err := s.repo.MemesUsed(ctx, userID, time.Now().AddDate(0, 0, -int(plan.Duration)))
-		if err != nil {
-			return SubscriptionStatus{}, err
-		}
 		var endsAt *string
 		if sub.EndsAt != nil {
 			s := sub.EndsAt.UTC().Format(time.RFC3339)
@@ -111,6 +108,9 @@ func (s *Service) Status(ctx context.Context, userID string) (SubscriptionStatus
 			MemesUsed:  used,
 			MaxMemes:   plan.MaxMemes,
 		}, nil
+	}
+	if !errors.Is(err, ErrNotSubscribed) {
+		return SubscriptionStatus{}, err
 	}
 	return SubscriptionStatus{Subscribed: false, MemesUsed: 0, MaxMemes: 0}, nil
 }

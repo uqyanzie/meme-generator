@@ -223,6 +223,37 @@ func (r *Repository) ActiveByUser(ctx context.Context, userID string) (Subscript
 	return sub, p, nil
 }
 
+// ActiveStatusByUser memuat langganan aktif beserta jumlah meme terpakai dalam satu query.
+func (r *Repository) ActiveStatusByUser(ctx context.Context, userID string) (Subscription, Plan, int32, error) {
+	const q = `
+		SELECT s.id, s.user_id, s.plan_id, s.status, s.starts_at, s.ends_at,
+		       p.id, p.code, p.name, p.price_idr, p.duration_days, p.max_memes, p.active,
+		       (SELECT COUNT(*) FROM memes m
+		        WHERE m.user_id = s.user_id
+		          AND m.created_at >= now() - make_interval(days => p.duration_days)) AS memes_used
+		FROM subscriptions s
+		JOIN plans p ON p.id = s.plan_id
+		WHERE s.user_id = $1 AND s.status = 'active' AND s.ends_at > now()
+		ORDER BY s.ends_at DESC LIMIT 1`
+	var (
+		sub       Subscription
+		p         Plan
+		memesUsed int32
+	)
+	err := r.pool.QueryRow(ctx, q, userID).Scan(
+		&sub.ID, &sub.UserID, &sub.PlanID, &sub.Status, &sub.StartsAt, &sub.EndsAt,
+		&p.ID, &p.Code, &p.Name, &p.PriceIDR, &p.Duration, &p.MaxMemes, &p.Active,
+		&memesUsed,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Subscription{}, Plan{}, 0, ErrNotSubscribed
+	}
+	if err != nil {
+		return Subscription{}, Plan{}, 0, fmt.Errorf("subscription repository: active status by user gagal: %w", err)
+	}
+	return sub, p, memesUsed, nil
+}
+
 // ActiveByUserForUpdate mengambil langganan aktif user sambil mengunci baris
 // subscription (FOR UPDATE OF s) di dalam transaksi agar pengecekan kuota
 // bersifat atomik terhadap request konkuren dari user yang sama.
